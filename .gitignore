@@ -1,0 +1,22 @@
+# Temporary files
+*.tmp
+*.temp
+
+# Thumbnails
+*.thumb
+._*
+
+# Allow specific video directories if needed
+# !important-videos/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# videos directory
+videos/*
