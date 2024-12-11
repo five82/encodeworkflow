@@ -7,9 +7,10 @@
 # ffmpeg
 
 # Variables
-INPUT_DIR="${HOME}/videos/input"
-OUTPUT_DIR="${HOME}/videos/output"
-LOG_DIR="${HOME}/videos/logs"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+INPUT_DIR="${SCRIPT_DIR}/videos/input"
+OUTPUT_DIR="${SCRIPT_DIR}/videos/output"
+LOG_DIR="${SCRIPT_DIR}/videos/logs"
 
 # Arrays to store encoding information
 declare -a encoded_files
@@ -32,6 +33,8 @@ get_timestamp() {
 }
 
 # Create directories if they don't exist
+mkdir -p "${SCRIPT_DIR}/videos"
+mkdir -p "${INPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 mkdir -p "${LOG_DIR}"
 
