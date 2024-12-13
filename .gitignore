@@ -20,3 +20,10 @@ Thumbs.db
 
 # videos directory
 videos/*
+
+# Build directory
+build/
+
+# FFmpeg binaries
+ffmpeg
+ffprobe 
