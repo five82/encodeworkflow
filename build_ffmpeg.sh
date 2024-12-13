@@ -464,3 +464,6 @@ cp -v "${INSTALL_DIR}/bin/ffprobe" "${SCRIPT_DIR}/ffprobe"
 echo "Done! Binaries are available at:"
 echo "  ffmpeg:  ${SCRIPT_DIR}/ffmpeg"
 echo "  ffprobe: ${SCRIPT_DIR}/ffprobe"
+
+# Cleanup
+rm -rf "${BUILD_DIR}"
