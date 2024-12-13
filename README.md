@@ -1,2 +1,2 @@
 # encodeworkflow
-My videoencoding workflow
+My video encoding workflow
