@@ -11,7 +11,14 @@
 # Configuration
 ###################
 
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS doesn't have readlink -f, use this alternative
+    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+else
+    # Linux can use readlink -f
+    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+fi
+
 FFMPEG="${SCRIPT_DIR}/ffmpeg"
 FFPROBE="${SCRIPT_DIR}/ffprobe"
 INPUT_DIR="${SCRIPT_DIR}/videos/input"
@@ -423,3 +430,10 @@ for i in "${!encoded_files[@]}"; do
     print_encoding_summary "$i"
 done
 echo "Total execution time: ${total_hours}h ${total_minutes}m ${total_seconds}s"
+
+# Add debug output after setting FFMPEG/FFPROBE
+echo "Using ffmpeg binary: ${FFMPEG}"
+echo "Using ffprobe binary: ${FFPROBE}"
+
+# Add version check to confirm which ffmpeg is being used
+"${FFMPEG}" -version | head -n 1
