@@ -39,15 +39,6 @@ check_ubuntu_deps() {
         "gperf"
         "gettext"
         "libexpat1-dev"
-        
-        # Additional essential packages
-        "build-essential"
-        "libssl-dev"
-        "zlib1g-dev"
-        "libass-dev"
-        "python3"
-        "python3-pip"
-        "texinfo"
     )
 
     echo "Checking Ubuntu dependencies..."
