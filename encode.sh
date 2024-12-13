@@ -19,7 +19,7 @@ OUTPUT_DIR="${SCRIPT_DIR}/videos/output"
 LOG_DIR="${SCRIPT_DIR}/videos/logs"
 
 # Encoding settings
-PRESET=8
+PRESET=6
 CRF=29
 SVT_PARAMS="tune=3:film-grain=0:film-grain-denoise=0:adaptive-film-grain=0"
 PIX_FMT="yuv420p10le"
@@ -119,12 +119,13 @@ setup_audio_options() {
                 ;;
         esac
         
-        # Add channel remapping for 5.1
-        if [ "$num_channels" -eq 6 ]; then
-            audio_opts+=" -map 0:a:${stream_index} -c:a:${stream_index} libopus -filter:a:${stream_index} aformat=channel_layouts=5.1 -b:a:${stream_index} ${bitrate}"
-        else
-            audio_opts+=" -map 0:a:${stream_index} -c:a:${stream_index} libopus -ac:${stream_index} ${num_channels} -channel_layout:${stream_index} ${layout} -b:a:${stream_index} ${bitrate}"
-        fi
+        # Apply consistent channel layout filter for all streams
+        audio_opts+=" -map 0:a:${stream_index} -c:a:${stream_index} libopus"
+        audio_opts+=" -filter:a:${stream_index} aformat=channel_layouts=7.1|5.1|stereo|mono"
+        audio_opts+=" -ac:${stream_index} ${num_channels}"
+        audio_opts+=" -channel_layout:${stream_index} ${layout}"
+        audio_opts+=" -b:a:${stream_index} ${bitrate}"
+        
         echo "Added bitrate for audio stream $stream_index ($num_channels channels): ${bitrate}" >&2
         ((stream_index++))
     done
@@ -182,7 +183,8 @@ format_size() {
         ((scale++))
     done
     
-    printf "%s %s" "$size" "${suffix[$scale]}"
+    # Return just the number, not the unit
+    echo "$size"
 }
 
 print_encoding_summary() {
@@ -192,18 +194,22 @@ print_encoding_summary() {
     local m=$(( (time_seconds % 3600) / 60 ))
     local s=$((time_seconds % 60))
     
-    # Use format_size instead of numfmt
-    local input_size=$(format_size "${input_sizes[$i]}")
-    local output_size=$(format_size "${output_sizes[$i]}")
+    # Get raw sizes for reduction calculation
+    local input_raw=${input_sizes[$i]}
+    local output_raw=${output_sizes[$i]}
     
-    # Calculate reduction using bc for floating point arithmetic
+    # Calculate reduction using the raw byte values
     local reduction
-    reduction=$(echo "scale=1; 100 - (${output_sizes[$i]} * 100 / ${input_sizes[$i]})" | bc)
+    reduction=$(echo "scale=2; (1 - ($output_raw/$input_raw)) * 100" | bc)
+    
+    # Convert to MB for display (using bc for floating point)
+    local input_mb=$(echo "scale=2; $input_raw / 1048576" | bc)
+    local output_mb=$(echo "scale=2; $output_raw / 1048576" | bc)
     
     echo "${encoded_files[$i]}"
     echo "  Encode time: ${h}h ${m}m ${s}s"
-    echo "  Input size:  ${input_size}"
-    echo "  Output size: ${output_size}"
+    echo "  Input size:  ${input_mb} MB"
+    echo "  Output size: ${output_mb} MB"
     echo "  Reduced by:  ${reduction}%"
     echo "----------------------------------------"
 }
@@ -264,6 +270,57 @@ validate_output() {
     fi
 }
 
+process_file() {
+    local input_file="$1"
+    local output_file="$2"
+    local log_file="$3"
+    local filename="$4"
+
+    echo "Starting encode at $(date)"
+    echo "Input file: ${input_file}"
+    echo "Output file: ${output_file}"
+    echo "----------------------------------------"
+    echo "Processing: ${filename}"
+
+    detect_dolby_vision "${input_file}"
+    
+    # Setup encoding options
+    audio_opts=$(setup_audio_options "${input_file}")
+    subtitle_opts=$(setup_subtitle_options "${input_file}")
+    video_opts=$(setup_video_options)
+    
+    echo "Starting ffmpeg encode..."
+    
+    # Add before the ffmpeg command
+    echo "Video stream details:"
+    "${FFPROBE}" -v error -select_streams v -show_entries \
+        stream=index,codec_name,width,height,r_frame_rate,pix_fmt \
+        -of json "${input_file}" | tee -a "${log_file}"
+    
+    echo "Audio stream details:"
+    "${FFPROBE}" -v error -select_streams a -show_entries \
+        stream=index,codec_name,channels,channel_layout,sample_rate,bit_rate \
+        -of json "${input_file}" | tee -a "${log_file}"
+    
+    # Main encoding command
+    "${FFMPEG}" -hide_banner -i "${input_file}" \
+        -map 0:v:0 \
+        ${video_opts} \
+        ${audio_opts} \
+        ${subtitle_opts} \
+        -stats \
+        -y "${output_file}"
+
+    # Validate the output
+    if ! validate_output "${output_file}"; then
+        echo "Error: Output validation failed for ${filename}"
+        rm -f "${output_file}"  # Remove invalid output
+        return 1
+    fi
+
+    return 0
+}
+
 ###################
 # Initialization
 ###################
@@ -279,6 +336,12 @@ if ! command -v mediainfo >/dev/null 2>&1; then
     echo "Error: mediainfo not found. Please install mediainfo first."
     echo "On Ubuntu/Debian: sudo apt-get install mediainfo"
     echo "On macOS: brew install mediainfo"
+    exit 1
+fi
+
+if ! command -v bc >/dev/null 2>&1; then
+    echo "Error: bc not found. Please install bc first."
+    echo "On Ubuntu/Debian: sudo apt-get install bc"
     exit 1
 fi
 
@@ -305,49 +368,7 @@ for input_file in "${files[@]}"; do
     
     file_start_time=$(date +%s)
     
-    {
-        echo "Starting encode at $(date)"
-        echo "Input file: ${input_file}"
-        echo "Output file: ${output_file}"
-        echo "----------------------------------------"
-        echo "Processing: ${filename}"
-
-        detect_dolby_vision "${input_file}"
-        
-        # Setup encoding options
-        audio_opts=$(setup_audio_options "${input_file}")
-        subtitle_opts=$(setup_subtitle_options "${input_file}")
-        video_opts=$(setup_video_options)
-        
-        echo "Starting ffmpeg encode..."
-        
-        # Add before the ffmpeg command
-        echo "Video stream details:"
-        "${FFPROBE}" -v error -select_streams v -show_entries \
-            stream=index,codec_name,width,height,r_frame_rate,pix_fmt \
-            -of json "${input_file}"
-        
-        echo "Audio stream details:"
-        "${FFPROBE}" -v error -select_streams a -show_entries \
-            stream=index,codec_name,channels,channel_layout,sample_rate,bit_rate \
-            -of json "${input_file}"
-        
-        # Main encoding command
-        "${FFMPEG}" -v verbose -i "${input_file}" \
-            -map 0:v:0 \
-            ${video_opts} \
-            ${audio_opts} \
-            ${subtitle_opts} \
-            -y "${output_file}"
-
-        # Validate the output
-        if ! validate_output "${output_file}"; then
-            echo "Error: Output validation failed for ${filename}"
-            rm -f "${output_file}"  # Remove invalid output
-            exit 1
-        fi
-          
-    } 2>&1 | tee "${log_file}"
+    process_file "${input_file}" "${output_file}" "${log_file}" "${filename}" 2>&1 | tee "${log_file}"
     
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
         file_end_time=$(date +%s)
@@ -360,9 +381,9 @@ for input_file in "${files[@]}"; do
         output_sizes+=("$(get_file_size "${output_file}")")
         
         # Print completion message
-        hours=$((file_elapsed_time / 3600))
-        minutes=$(( (file_elapsed_time % 3600) / 60 ))
-        seconds=$((file_elapsed_time % 60))
+        hours=$(awk "BEGIN {printf \"%.0f\", $file_elapsed_time/3600}")
+        minutes=$(awk "BEGIN {printf \"%.0f\", ($file_elapsed_time%3600)/60}")
+        seconds=$(awk "BEGIN {printf \"%.0f\", $file_elapsed_time%60}")
         
         echo "----------------------------------------"
         echo "Completed: ${filename}"
@@ -387,9 +408,9 @@ fi
 # Calculate total time
 total_end_time=$(date +%s)
 total_elapsed_time=$((total_end_time - total_start_time))
-total_hours=$((total_elapsed_time / 3600))
-total_minutes=$(( (total_elapsed_time % 3600) / 60 ))
-total_seconds=$((total_elapsed_time % 60))
+total_hours=$(awk "BEGIN {printf \"%.0f\", $total_elapsed_time/3600}")
+total_minutes=$(awk "BEGIN {printf \"%.0f\", ($total_elapsed_time%3600)/60}")
+total_seconds=$(awk "BEGIN {printf \"%.0f\", $total_elapsed_time%60}")
 
 # Print summary
 echo "All files processed successfully!"
