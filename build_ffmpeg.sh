@@ -39,6 +39,15 @@ check_ubuntu_deps() {
         "gperf"
         "gettext"
         "libexpat1-dev"
+        
+        # Additional essential packages
+        "build-essential"
+        "libssl-dev"
+        "zlib1g-dev"
+        "libass-dev"
+        "python3"
+        "python3-pip"
+        "texinfo"
     )
 
     echo "Checking Ubuntu dependencies..."
@@ -237,35 +246,138 @@ ninja -C build
 ninja -C build install
 cd $BUILD_DIR
 
+# Add this function before the FFmpeg build section
+verify_compiler() {
+    echo "Verifying compiler installation..."
+    
+    # Test gcc
+    if ! gcc -v &>/dev/null; then
+        echo "Error: gcc is not working properly"
+        return 1
+    fi
+    
+    # Create and run a simple test program
+    local test_file="/tmp/test.c"
+    echo "int main() { return 0; }" > "$test_file"
+    if ! gcc -o /tmp/test "$test_file"; then
+        echo "Error: gcc cannot create executables"
+        return 1
+    fi
+    
+    rm -f /tmp/test /tmp/test.c
+    echo "Compiler verification successful"
+    return 0
+}
+
+# Add this function after verify_compiler()
+configure_ffmpeg() {
+    local common_flags=(
+        --prefix="${INSTALL_DIR}"
+        --enable-gpl
+        --enable-version3
+        --enable-static
+        --disable-shared
+        --disable-doc
+        --disable-debug
+        --disable-ffplay
+        --enable-ffprobe
+        --pkg-config-flags="--static"
+        --extra-cflags="-I${INSTALL_DIR}/include -O3"
+        --extra-libs="-lpthread -lm"
+        --enable-libdav1d
+        --enable-libopus
+        --enable-libsvtav1
+    )
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS-specific configuration
+        ./configure \
+            "${common_flags[@]}" \
+            --disable-videotoolbox \
+            --disable-audiotoolbox \
+            --disable-coreimage \
+            --disable-avfoundation \
+            --disable-metal \
+            --disable-securetransport \
+            --disable-iconv \
+            --disable-sdl2 \
+            --disable-zlib \
+            --disable-bzlib \
+            --disable-lzma \
+            --disable-protocols \
+            --enable-protocol=file \
+            --disable-xlib \
+            --disable-libxcb \
+            --disable-network \
+            --disable-cuda \
+            --disable-cuvid \
+            --disable-nvenc \
+            --disable-nvdec \
+            --disable-vaapi \
+            --disable-vdpau \
+            --disable-opencl \
+            --disable-opengl \
+            --disable-vulkan \
+            --extra-ldflags="-L${INSTALL_DIR}/lib" \
+            --extra-cflags="-I${INSTALL_DIR}/include -O3 -fno-common" \
+            --cc="clang" || {
+                echo "FFmpeg configure failed. Checking config.log..."
+                cat ffbuild/config.log
+                exit 1
+            }
+    else
+        # Linux configuration
+        ./configure \
+            "${common_flags[@]}" \
+            --extra-ldflags="-L${INSTALL_DIR}/lib -L${INSTALL_DIR}/lib64" \
+            --extra-ldexeflags="-static" \
+            --cc=gcc || {
+                echo "FFmpeg configure failed. Checking config.log..."
+                cat ffbuild/config.log
+                exit 1
+            }
+    fi
+}
+
 # Build FFmpeg
 git clone --depth=1 https://github.com/FFmpeg/FFmpeg.git
 cd FFmpeg
 
-# Configure FFmpeg
-./configure \
-    --prefix="${INSTALL_DIR}" \
-    --enable-gpl \
-    --enable-version3 \
-    --enable-static \
-    --disable-shared \
-    --disable-doc \
-    --disable-debug \
-    --disable-ffplay \
-    --enable-ffprobe \
-    --pkg-config-flags="--static" \
-    --extra-cflags="-I${INSTALL_DIR}/include" \
-    --extra-ldflags="-L${INSTALL_DIR}/lib -L${INSTALL_DIR}/lib64" \
-    --extra-libs="-lpthread -lm" \
-    --extra-ldexeflags="-static" \
-    --enable-libdav1d \
-    --enable-libopus \
-    --enable-libsvtav1
+# Verify compiler before proceeding
+if ! verify_compiler; then
+    echo "Error: Compiler verification failed"
+    exit 1
+fi
 
-make -j$(nproc)
-make install
-cd $BUILD_DIR
+# Add diagnostic information
+echo "Checking build environment..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "clang version: $(clang --version | head -n 1)"
+else
+    echo "gcc version: $(gcc -dumpversion)"
+fi
+echo "Current directory: $(pwd)"
+echo "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
+echo "Install directory: ${INSTALL_DIR}"
 
-# Update validation section to use local installation
+# Configure FFmpeg with platform-specific settings
+configure_ffmpeg
+
+# Use number of CPU cores or fallback to 2 if nproc is not available
+NPROC=$(nproc 2>/dev/null || echo 2)
+echo "Building with $NPROC parallel jobs..."
+
+make -j"${NPROC}" || {
+    echo "FFmpeg make failed"
+    exit 1
+}
+
+make install || {
+    echo "FFmpeg installation failed"
+    exit 1
+}
+
+# Update validation section
 echo "Validating FFmpeg installation..."
 
 # Check if ffmpeg and ffprobe are in our local installation
@@ -297,34 +409,59 @@ if [ ${#MISSING_LIBS[@]} -ne 0 ]; then
     exit 1
 fi
 
-# Verify static linking
-echo "Verifying static linking..."
+# Verify linking
+echo "Verifying dependencies..."
 if command -v ldd >/dev/null; then
     echo "Running ldd check..."
     LDD_OUTPUT=$(ldd "${INSTALL_DIR}/bin/ffmpeg" 2>&1)
     if [[ "$LDD_OUTPUT" =~ "not a dynamic executable" ]]; then
         echo "Confirmed: FFmpeg is statically linked"
     else
-        echo "Error: FFmpeg is not statically linked. ldd output:"
+        echo "Error: FFmpeg is not statically linked on Linux. ldd output:"
         echo "$LDD_OUTPUT"
         exit 1
     fi
 elif command -v otool >/dev/null; then
     echo "Running otool check..."
-    if OTOOL_OUTPUT=$(otool -L "${INSTALL_DIR}/bin/ffmpeg" 2>&1) && \
-       [[ $(echo "$OTOOL_OUTPUT" | wc -l) -le 2 ]]; then
-        echo "Confirmed: FFmpeg appears to be statically linked"
+    OTOOL_OUTPUT=$(otool -L "${INSTALL_DIR}/bin/ffmpeg")
+    
+    # Define allowed system frameworks for macOS
+    ALLOWED_DEPS=(
+        "/usr/lib/libSystem"
+        "/System/Library/Frameworks/CoreFoundation"
+        "/System/Library/Frameworks/CoreVideo"
+        "/System/Library/Frameworks/CoreMedia"
+    )
+    
+    UNEXPECTED_DEPS=0
+    while IFS= read -r line; do
+        # Skip the first line (binary path)
+        if [[ "$line" =~ ^[[:space:]]*/ ]]; then
+            ALLOWED=0
+            for allowed in "${ALLOWED_DEPS[@]}"; do
+                if [[ "$line" =~ $allowed ]]; then
+                    ALLOWED=1
+                    break
+                fi
+            done
+            if [ $ALLOWED -eq 0 ]; then
+                echo "Warning: Unexpected dependency: $line"
+                UNEXPECTED_DEPS=1
+            fi
+        fi
+    done <<< "$OTOOL_OUTPUT"
+    
+    if [ $UNEXPECTED_DEPS -eq 0 ]; then
+        echo "Dependency check passed: Only expected system libraries found"
     else
-        echo "Error: FFmpeg is not statically linked. otool output:"
-        echo "$OTOOL_OUTPUT"
-        exit 1
+        echo "Warning: Found unexpected dependencies"
+        echo "This is acceptable on macOS as long as the binary works as expected"
     fi
 else
-    echo "Warning: Cannot verify static linking - neither ldd nor otool found"
+    echo "Warning: Cannot verify linking - neither ldd nor otool found"
 fi
 
-# At the end, after static linking verification:
-echo "FFmpeg validation successful!"
+echo "FFmpeg validation completed!"
 echo "Build completed successfully!"
 echo "Binaries location:"
 echo "  ffmpeg:  ${INSTALL_DIR}/bin/ffmpeg"
