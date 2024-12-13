@@ -19,7 +19,7 @@ ehthumbs.db
 Thumbs.db
 
 # videos directory
-videos/*
+videos/
 
 # Build directory
 build/
