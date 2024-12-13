@@ -91,49 +91,51 @@ setup_audio_options() {
             continue
         fi
         
+        # Standardize channel layouts and bitrates
         case $num_channels in
             1)  
-                bitrate=64k
+                bitrate="64k"
                 layout="mono"
                 ;;
             2)  
-                bitrate=128k
+                bitrate="128k"
                 layout="stereo"
                 ;;
             6)  
-                bitrate=256k
+                bitrate="256k"
                 layout="5.1"
                 ;;
             8)  
-                bitrate=384k
+                bitrate="384k"
                 layout="7.1"
                 ;;
             *)  
-                if [ "$num_channels" -gt 0 ]; then
-                    bitrate="${num_channels}k"
-                    layout="$num_channels channels"
-                else
-                    echo "Invalid channel count for stream $stream_index, skipping" >&2
-                    continue
-                fi
+                echo "Unsupported channel count ($num_channels) for stream $stream_index, defaulting to stereo" >&2
+                num_channels=2
+                bitrate="128k"
+                layout="stereo"
                 ;;
         esac
         
-        # Apply consistent channel layout filter for all streams
-        audio_opts+=" -map 0:a:${stream_index} -c:a:${stream_index} libopus"
-        audio_opts+=" -filter:a:${stream_index} aformat=channel_layouts=7.1|5.1|stereo|mono"
-        audio_opts+=" -ac:${stream_index} ${num_channels}"
-        audio_opts+=" -channel_layout:${stream_index} ${layout}"
+        # Apply consistent audio encoding settings
+        audio_opts+=" -map 0:a:${stream_index}"
+        audio_opts+=" -c:a:${stream_index} libopus"
         audio_opts+=" -b:a:${stream_index} ${bitrate}"
+        audio_opts+=" -ac:${stream_index} ${num_channels}"
         
-        echo "Added bitrate for audio stream $stream_index ($num_channels channels): ${bitrate}" >&2
+        # Apply consistent channel layout filter to avoid libopus mapping bugs
+        audio_opts+=" -filter:a:${stream_index} aformat=channel_layouts=7.1|5.1|stereo|mono"
+        audio_opts+=" -channel_layout:${stream_index} ${layout}"
+        
+        # Set consistent opus-specific options
+        audio_opts+=" -application:a:${stream_index} audio"
+        audio_opts+=" -frame_duration:a:${stream_index} 20"
+        audio_opts+=" -vbr:a:${stream_index} on"
+        audio_opts+=" -compression_level:a:${stream_index} 10"
+        
+        echo "Configured audio stream $stream_index: ${num_channels} channels, ${layout} layout, ${bitrate} bitrate" >&2
         ((stream_index++))
     done
-
-    if [ -z "$audio_opts" ]; then
-        echo "Warning: No valid audio streams to encode" >&2
-        return 0
-    fi
 
     echo "Final audio options: ${audio_opts}" >&2
     printf "%s" "${audio_opts}"
