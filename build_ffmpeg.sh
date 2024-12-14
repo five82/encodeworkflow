@@ -201,8 +201,8 @@ make -j$(nproc)
 make install
 cd $BUILD_DIR
 
-# Build svt-av1-psy
-git clone https://github.com/gianni-rosato/svt-av1-psy.git
+# Build svt-av1
+git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git
 cd svt-av1-psy
 mkdir -p Build
 cd Build

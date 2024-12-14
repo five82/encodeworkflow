@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Encodes videos with ffmpeg and svt-av1-psy
+# Encodes videos with ffmpeg and svt-av1
 #
 # Required tools:
 # - ffmpeg (from build_ffmpeg.sh)
@@ -30,7 +30,7 @@ LOG_DIR="${SCRIPT_DIR}/videos/logs"
 # Encoding settings
 PRESET=6
 CRF=29
-SVT_PARAMS="tune=3:film-grain=0:film-grain-denoise=0:adaptive-film-grain=0"
+SVT_PARAMS="tune=0:film-grain=0:film-grain-denoise=0"
 PIX_FMT="yuv420p10le"
 
 # Arrays to store encoding information
