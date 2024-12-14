@@ -203,7 +203,7 @@ cd $BUILD_DIR
 
 # Build svt-av1
 git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git
-cd svt-av1-psy
+cd SVT-AV1
 mkdir -p Build
 cd Build
 cmake .. -G"Unix Makefiles" \
