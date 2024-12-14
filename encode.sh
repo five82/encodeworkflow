@@ -7,7 +7,6 @@
 # - ffprobe (from build_ffmpeg.sh)  
 # - mediainfo
 # - bc
-# - jq
 
 ###################
 # Configuration
@@ -399,8 +398,22 @@ process_file() {
         stream=index,codec_name,channels,channel_layout,sample_rate,bit_rate \
         -of json "${input_file}" | tee -a "${log_file}"
     
-    # Main encoding command
-    "${FFMPEG}" -hide_banner -i "${input_file}" \
+    cat <<-EOF | tee -a "${log_file}"
+Running ffmpeg command:
+${FFMPEG} -hide_banner -loglevel warning -i "${input_file}" \\
+    -map 0:v:0 \\
+    -c:v libsvtav1 \\
+    -preset ${PRESET} \\
+    -crf ${crf} \\
+    -svtav1-params ${SVT_PARAMS} \\
+    -pix_fmt ${PIX_FMT} \\
+$(echo "${audio_opts}" | sed 's/ -/\\\n    -/g') \\
+$(echo "${subtitle_opts}" | sed 's/ -/\\\n    -/g') \\
+    -stats \\
+    -y "${output_file}"
+EOF
+    
+    "${FFMPEG}" -hide_banner -loglevel warning -i "${input_file}" \
         -map 0:v:0 \
         ${video_opts} \
         ${audio_opts} \
