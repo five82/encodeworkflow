@@ -135,7 +135,6 @@ setup_audio_options() {
         
         # Apply consistent channel layout filter to avoid libopus mapping bugs
         audio_opts+=" -filter:a:${stream_index} aformat=channel_layouts=7.1|5.1|stereo|mono"
-        audio_opts+=" -channel_layout:${stream_index} ${layout}"
         
         # Set consistent opus-specific options
         audio_opts+=" -application:a:${stream_index} audio"
