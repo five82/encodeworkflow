@@ -385,28 +385,23 @@ process_file() {
     subtitle_opts=$(setup_subtitle_options "${input_file}")
     video_opts=$(setup_video_options "${input_file}")
     
-    echo "Starting ffmpeg encode..."
+    # Prepare video options for display
+    video_display_opts="-c:v libsvtav1 \\
+    -preset ${PRESET} \\
+    -crf ${crf} \\
+    -svtav1-params ${SVT_PARAMS} \\
+    -pix_fmt ${PIX_FMT}"
     
-    # Add before the ffmpeg command
-    echo "Video stream details:"
-    "${FFPROBE}" -v error -select_streams v -show_entries \
-        stream=index,codec_name,width,height,r_frame_rate,pix_fmt \
-        -of json "${input_file}" | tee -a "${log_file}"
-    
-    echo "Audio stream details:"
-    "${FFPROBE}" -v error -select_streams a -show_entries \
-        stream=index,codec_name,channels,channel_layout,sample_rate,bit_rate \
-        -of json "${input_file}" | tee -a "${log_file}"
+    if [[ "$IS_DOLBY_VISION" == "true" ]]; then
+        video_display_opts+=" \\
+    -dolbyvision true"
+    fi
     
     cat <<-EOF | tee -a "${log_file}"
 Running ffmpeg command:
 ${FFMPEG} -hide_banner -loglevel warning -i "${input_file}" \\
     -map 0:v:0 \\
-    -c:v libsvtav1 \\
-    -preset ${PRESET} \\
-    -crf ${crf} \\
-    -svtav1-params ${SVT_PARAMS} \\
-    -pix_fmt ${PIX_FMT} \\
+${video_display_opts} \\
 $(echo "${audio_opts}" | sed 's/ -/\\\n    -/g') \\
 $(echo "${subtitle_opts}" | sed 's/ -/\\\n    -/g') \\
     -stats \\
