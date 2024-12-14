@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
 
-# Encodes videos with ffmpeg and svt-av1
-#
-# Required tools:
-# - ffmpeg (from build_ffmpeg.sh)
-# - ffprobe (from build_ffmpeg.sh)  
-# - mediainfo
-# - bc
-
 ###################
 # Configuration
 ###################
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS doesn't have readlink -f, use this alternative
     SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 else
-    # Linux can use readlink -f
     SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 fi
 
@@ -46,6 +36,26 @@ IS_DOLBY_VISION=false
 ###################
 # Helper Functions
 ###################
+
+check_dependencies() {
+    if [ ! -x "$FFMPEG" ] || [ ! -x "$FFPROBE" ]; then
+        echo "Error: ffmpeg or ffprobe not found in script directory"
+        echo "Please run build_ffmpeg.sh first"
+        return 1
+    fi
+
+    for cmd in mediainfo bc; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "Error: $cmd not found. Please install $cmd first."
+            return 1
+        fi
+    done
+    return 0
+}
+
+initialize_directories() {
+    mkdir -p "${SCRIPT_DIR}/videos" "${INPUT_DIR}" "${OUTPUT_DIR}" "${LOG_DIR}"
+}
 
 get_file_size() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -426,109 +436,118 @@ EOF
 }
 
 ###################
-# Initialization
-###################
-
-# Check required tools
-if [ ! -x "$FFMPEG" ] || [ ! -x "$FFPROBE" ]; then
-    echo "Error: ffmpeg or ffprobe not found in script directory"
-    echo "Please run build_ffmpeg.sh first"
-    exit 1
-fi
-
-if ! command -v mediainfo >/dev/null 2>&1; then
-    echo "Error: mediainfo not found. Please install mediainfo first."
-    echo "On Ubuntu/Debian: sudo apt-get install mediainfo"
-    echo "On macOS: brew install mediainfo"
-    exit 1
-fi
-
-if ! command -v bc >/dev/null 2>&1; then
-    echo "Error: bc not found. Please install bc first."
-    echo "On Ubuntu/Debian: sudo apt-get install bc"
-    exit 1
-fi
-
-# Create required directories
-mkdir -p "${SCRIPT_DIR}/videos" "${INPUT_DIR}" "${OUTPUT_DIR}" "${LOG_DIR}"
-
-###################
 # Main Processing
 ###################
 
-# Start total timing
-total_start_time=$(date +%s)
+main() {
+    if ! check_dependencies; then
+        exit 1
+    fi
 
-# Get input files
-IFS=$'\n' read -r -d '' -a files < <(find "${INPUT_DIR}" -type f -iname "*.mkv" -print0 | tr '\0' '\n')
+    initialize_directories
 
-# Process each file
-for input_file in "${files[@]}"; do
+    # Start total timing
+    local total_start_time
+    total_start_time=$(date +%s)
+
+    # Get input files
+    local files
+    IFS=$'\n' read -r -d '' -a files < <(find "${INPUT_DIR}" -type f -iname "*.mkv" -print0 | tr '\0' '\n')
+
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "No MKV files found in ${INPUT_DIR}"
+        exit 1
+    fi
+
+    # Process each file
+    for input_file in "${files[@]}"; do
+        process_single_file "$input_file"
+    done
+
+    print_final_summary "$total_start_time"
+}
+
+process_single_file() {
+    local input_file="$1"
+    local filename
     filename=$(basename "${input_file}")
-    filename_noext="${filename%.*}"
-    output_file="${OUTPUT_DIR}/${filename}"
+    local filename_noext="${filename%.*}"
+    local output_file="${OUTPUT_DIR}/${filename}"
+    local timestamp
     timestamp=$(get_timestamp)
-    log_file="${LOG_DIR}/${filename_noext}_${timestamp}.log"
+    local log_file="${LOG_DIR}/${filename_noext}_${timestamp}.log"
     
+    local file_start_time
     file_start_time=$(date +%s)
     
     process_file "${input_file}" "${output_file}" "${log_file}" "${filename}" 2>&1 | tee "${log_file}"
     
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
-        file_end_time=$(date +%s)
-        file_elapsed_time=$((file_end_time - file_start_time))
-        
-        # Store encoding information
-        encoded_files+=("$filename")
-        encoding_times+=("$file_elapsed_time")
-        input_sizes+=("$(get_file_size "${input_file}")")
-        output_sizes+=("$(get_file_size "${output_file}")")
-        
-        # Print completion message
-        hours=$(awk "BEGIN {printf \"%.0f\", $file_elapsed_time/3600}")
-        minutes=$(awk "BEGIN {printf \"%.0f\", ($file_elapsed_time%3600)/60}")
-        seconds=$(awk "BEGIN {printf \"%.0f\", $file_elapsed_time%60}")
-        
-        echo "----------------------------------------"
-        echo "Completed: ${filename}"
-        echo "Encoding time: ${hours}h ${minutes}m ${seconds}s"
-        echo "Finished encode at $(date)"
+        handle_successful_encode "$filename" "$file_start_time" "$input_file" "$output_file"
     else
         echo "Error encoding ${filename}"
     fi
+}
+
+handle_successful_encode() {
+    local filename="$1"
+    local file_start_time="$2"
+    local input_file="$3"
+    local output_file="$4"
+
+    local file_end_time
+    file_end_time=$(date +%s)
+    local file_elapsed_time=$((file_end_time - file_start_time))
+    
+    # Store encoding information
+    encoded_files+=("$filename")
+    encoding_times+=("$file_elapsed_time")
+    input_sizes+=("$(get_file_size "${input_file}")")
+    output_sizes+=("$(get_file_size "${output_file}")")
+    
+    print_completion_message "$filename" "$file_elapsed_time"
+}
+
+print_completion_message() {
+    local filename="$1"
+    local elapsed_time="$2"
+    
+    local hours minutes seconds
+    hours=$(awk "BEGIN {printf \"%.0f\", $elapsed_time/3600}")
+    minutes=$(awk "BEGIN {printf \"%.0f\", ($elapsed_time%3600)/60}")
+    seconds=$(awk "BEGIN {printf \"%.0f\", $elapsed_time%60}")
     
     echo "----------------------------------------"
-done
+    echo "Completed: ${filename}"
+    echo "Encoding time: ${hours}h ${minutes}m ${seconds}s"
+    echo "Finished encode at $(date)"
+    echo "----------------------------------------"
+}
 
-###################
-# Final Summary
-###################
+print_final_summary() {
+    local total_start_time="$1"
+    local total_end_time
+    total_end_time=$(date +%s)
+    local total_elapsed_time=$((total_end_time - total_start_time))
+    
+    local total_hours total_minutes total_seconds
+    total_hours=$(awk "BEGIN {printf \"%.0f\", $total_elapsed_time/3600}")
+    total_minutes=$(awk "BEGIN {printf \"%.0f\", ($total_elapsed_time%3600)/60}")
+    total_seconds=$(awk "BEGIN {printf \"%.0f\", $total_elapsed_time%60}")
 
-if [ ${#encoded_files[@]} -eq 0 ]; then
-    echo "No MKV files found in ${INPUT_DIR}"
-    exit 1
-fi
+    echo "All files processed successfully!"
+    echo "----------------------------------------"
+    echo "Encoding Summary:"
+    echo "----------------------------------------"
+    for i in "${!encoded_files[@]}"; do
+        print_encoding_summary "$i"
+    done
+    echo "Total execution time: ${total_hours}h ${total_minutes}m ${total_seconds}s"
 
-# Calculate total time
-total_end_time=$(date +%s)
-total_elapsed_time=$((total_end_time - total_start_time))
-total_hours=$(awk "BEGIN {printf \"%.0f\", $total_elapsed_time/3600}")
-total_minutes=$(awk "BEGIN {printf \"%.0f\", ($total_elapsed_time%3600)/60}")
-total_seconds=$(awk "BEGIN {printf \"%.0f\", $total_elapsed_time%60}")
+    echo "Using ffmpeg binary: ${FFMPEG}"
+    echo "Using ffprobe binary: ${FFPROBE}"
+    "${FFMPEG}" -version | head -n 1
+}
 
-# Print summary
-echo "All files processed successfully!"
-echo "----------------------------------------"
-echo "Encoding Summary:"
-echo "----------------------------------------"
-for i in "${!encoded_files[@]}"; do
-    print_encoding_summary "$i"
-done
-echo "Total execution time: ${total_hours}h ${total_minutes}m ${total_seconds}s"
-
-# Add debug output after setting FFMPEG/FFPROBE
-echo "Using ffmpeg binary: ${FFMPEG}"
-echo "Using ffprobe binary: ${FFPROBE}"
-
-# Add version check to confirm which ffmpeg is being used
-"${FFMPEG}" -version | head -n 1
+# Execute main function
+main
