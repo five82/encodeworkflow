@@ -29,7 +29,9 @@ LOG_DIR="${SCRIPT_DIR}/videos/logs"
 
 # Encoding settings
 PRESET=6
-CRF=29
+CRF_SD=26  # For videos <= 720p
+CRF_HD=27  # For videos > 720p and <= 1080p
+CRF_UHD=29 # For videos > 1080p
 SVT_PARAMS="tune=0:film-grain=0:film-grain-denoise=0"
 PIX_FMT="yuv420p10le"
 
@@ -168,17 +170,34 @@ setup_subtitle_options() {
 }
 
 setup_video_options() {
+    local input_file="$1"
+    
+    # Get video width
+    local width
+    width=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$input_file")
+    
+    # Set CRF based on video width
+    local crf
+    if [ "$width" -le 1280 ]; then  # 720p or lower
+        crf=$CRF_SD
+        echo "SD quality detected (width: ${width}px), using CRF ${crf}" >&2
+    elif [ "$width" -le 1920 ]; then  # 1080p or lower
+        crf=$CRF_HD
+        echo "HD quality detected (width: ${width}px), using CRF ${crf}" >&2
+    else  # 4K and above
+        crf=$CRF_UHD
+        echo "UHD quality detected (width: ${width}px), using CRF ${crf}" >&2
+    fi
+
     local video_opts="-c:v libsvtav1 \
         -preset ${PRESET} \
-        -crf ${CRF} \
+        -crf ${crf} \
         -svtav1-params ${SVT_PARAMS} \
         -pix_fmt ${PIX_FMT}"
 
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
         video_opts+=" -dolbyvision true"
         echo "Using Dolby Vision optimized encoding settings" >&2
-    else
-        echo "Using standard encoding settings" >&2
     fi
     
     printf "%s" "${video_opts}"
@@ -365,7 +384,7 @@ process_file() {
     # Setup encoding options
     audio_opts=$(setup_audio_options "${input_file}")
     subtitle_opts=$(setup_subtitle_options "${input_file}")
-    video_opts=$(setup_video_options)
+    video_opts=$(setup_video_options "${input_file}")
     
     echo "Starting ffmpeg encode..."
     
