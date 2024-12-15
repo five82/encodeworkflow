@@ -33,6 +33,9 @@ declare -a output_sizes
 # Dolby Vision detection
 IS_DOLBY_VISION=false
 
+# Add to the Configuration section at the top
+HWACCEL_OPTS=""  # Will be set during initialization
+
 ###################
 # Helper Functions
 ###################
@@ -231,9 +234,12 @@ setup_video_options() {
         -svtav1-params ${SVT_PARAMS} \
         -pix_fmt ${PIX_FMT}"
 
+    # Only add Dolby Vision flag if it was actually detected
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
         video_opts+=" -dolbyvision true"
         echo "Using Dolby Vision optimized encoding settings" >&2
+    else
+        echo "Using standard encoding settings" >&2
     fi
     
     printf "%s" "${video_opts}"
@@ -403,6 +409,64 @@ validate_output() {
     fi
 }
 
+setup_hwaccel_options() {
+    local hwaccel_opts=""
+
+    echo "Checking hardware acceleration support..." >&2
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Skip VideoToolbox for Dolby Vision content on macOS as it's known to fail
+        if [[ "$IS_DOLBY_VISION" == "true" ]]; then
+            echo "Dolby Vision content detected - skipping VideoToolbox (known incompatibility)" >&2
+            return 0
+        fi
+        
+        # macOS: Check for VideoToolbox
+        if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "videotoolbox"; then
+            hwaccel_opts="-hwaccel videotoolbox -hwaccel_output_format nv12"
+            echo "Enabled VideoToolbox hardware decoding for macOS" >&2
+        fi
+    elif [[ "$OSTYPE" == "linux"* ]]; then
+        # Linux: Check available hardware
+        if command -v lspci >/dev/null 2>&1; then
+            if lspci | grep -i "VGA" | grep -qi "NVIDIA"; then
+                # NVIDIA: Check for NVDEC
+                if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "cuda" && \
+                   command -v nvidia-smi >/dev/null 2>&1; then
+                    hwaccel_opts="-hwaccel cuda -hwaccel_output_format cuda"
+                    echo "Enabled NVIDIA CUDA hardware decoding" >&2
+                fi
+            elif lspci | grep -i "VGA" | grep -qi "AMD"; then
+                # AMD: Check for VAAPI
+                if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "vaapi" && \
+                   [ -e "/dev/dri/renderD128" ]; then
+                    hwaccel_opts="-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi"
+                    echo "Enabled VAAPI hardware decoding for AMD GPU" >&2
+                fi
+            elif lspci | grep -i "VGA" | grep -qi "Intel"; then
+                # Intel: Check for QSV
+                if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "qsv" && \
+                   [ -e "/dev/dri/renderD128" ]; then
+                    hwaccel_opts="-hwaccel qsv -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format qsv"
+                    echo "Enabled QSV hardware decoding for Intel GPU" >&2
+                fi
+            fi
+        elif [ -f "/proc/device-tree/model" ] && grep -qi "raspberry pi" "/proc/device-tree/model"; then
+            # Raspberry Pi: Check for V4L2M2M
+            if [ -e "/dev/video10" ] && "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "v4l2m2m"; then
+                hwaccel_opts="-hwaccel v4l2m2m -hwaccel_device /dev/video10 -hwaccel_output_format nv12"
+                echo "Enabled V4L2M2M hardware decoding for Raspberry Pi" >&2
+            fi
+        fi
+    fi
+
+    if [ -z "$hwaccel_opts" ]; then
+        echo "No supported hardware acceleration found, using software decoding" >&2
+    fi
+
+    printf "%s" "${hwaccel_opts}"
+}
+
 process_file() {
     local input_file="$1"
     local output_file="$2"
@@ -422,30 +486,32 @@ process_file() {
     subtitle_opts=$(setup_subtitle_options "${input_file}")
     video_opts=$(setup_video_options "${input_file}")
     
-    # Prepare video options for display
-    video_display_opts="-c:v libsvtav1 \\
-    -preset ${PRESET} \\
-    -crf ${crf} \\
-    -svtav1-params ${SVT_PARAMS} \\
-    -pix_fmt ${PIX_FMT}"
+    # Format video options for display by replacing spaces with newlines and proper indentation
+    local video_display_opts
+    video_display_opts=$(echo "${video_opts}" | sed 's/-c:v/    -c:v/; s/ -/\\\n    -/g')
     
-    if [[ "$IS_DOLBY_VISION" == "true" ]]; then
-        video_display_opts+=" \\
-    -dolbyvision true"
-    fi
+    # Format audio options for display
+    local audio_display_opts
+    audio_display_opts=$(echo "${audio_opts}" | sed 's/-map/    -map/; s/ -/\\\n    -/g')
     
+    # Format subtitle options for display
+    local subtitle_display_opts
+    subtitle_display_opts=$(echo "${subtitle_opts}" | sed 's/-c:s/    -c:s/; s/ -/\\\n    -/g')
+    
+    # Log the ffmpeg command with proper formatting
     cat <<-EOF | tee -a "${log_file}"
 Running ffmpeg command:
-${FFMPEG} -hide_banner -loglevel warning -i "${input_file}" \\
+${FFMPEG} -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \\
     -map 0:v:0 \\
 ${video_display_opts} \\
-$(echo "${audio_opts}" | sed 's/ -/\\\n    -/g') \\
-$(echo "${subtitle_opts}" | sed 's/ -/\\\n    -/g') \\
+${audio_display_opts} \\
+${subtitle_display_opts} \\
     -stats \\
     -y "${output_file}"
 EOF
     
-    "${FFMPEG}" -hide_banner -loglevel warning -i "${input_file}" \
+    # Execute the actual ffmpeg command
+    "${FFMPEG}" -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \
         -map 0:v:0 \
         ${video_opts} \
         ${audio_opts} \
@@ -453,14 +519,31 @@ EOF
         -stats \
         -y "${output_file}"
 
+    local encode_status=$?
+    
+    # If hardware acceleration fails, retry with software decoding
+    if [ $encode_status -ne 0 ] && [ -n "${HWACCEL_OPTS}" ]; then
+        echo "Hardware acceleration failed, falling back to software decoding..." >&2
+        
+        "${FFMPEG}" -hide_banner -loglevel warning -i "${input_file}" \
+            -map 0:v:0 \
+            ${video_opts} \
+            ${audio_opts} \
+            ${subtitle_opts} \
+            -stats \
+            -y "${output_file}"
+            
+        encode_status=$?
+    fi
+
     # Validate the output
-    if ! validate_output "${output_file}"; then
-        echo "Error: Output validation failed for ${filename}"
+    if [ $encode_status -eq 0 ] && validate_output "${output_file}"; then
+        return 0
+    else
+        echo "Error: Encoding or validation failed for ${filename}" >&2
         rm -f "${output_file}"  # Remove invalid output
         return 1
     fi
-
-    return 0
 }
 
 ###################
@@ -507,6 +590,12 @@ process_single_file() {
     
     local file_start_time
     file_start_time=$(date +%s)
+
+    # Detect Dolby Vision before setting up hardware acceleration
+    detect_dolby_vision "${input_file}"
+    
+    # Initialize hardware acceleration after Dolby Vision detection
+    HWACCEL_OPTS=$(setup_hwaccel_options)
     
     process_file "${input_file}" "${output_file}" "${log_file}" "${filename}" 2>&1 | tee "${log_file}"
     
@@ -571,10 +660,6 @@ print_final_summary() {
         print_encoding_summary "$i"
     done
     echo "Total execution time: ${total_hours}h ${total_minutes}m ${total_seconds}s"
-
-    echo "Using ffmpeg binary: ${FFMPEG}"
-    echo "Using ffprobe binary: ${FFPROBE}"
-    "${FFMPEG}" -version | head -n 1
 }
 
 # Execute main function
