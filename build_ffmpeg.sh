@@ -202,6 +202,9 @@ configure_ffmpeg() {
         --enable-libopus \
         --enable-libsvtav1 \
         --enable-vaapi \
+        --enable-vulkan \
+        --enable-libdrm \
+        --enable-filter=scale_vaapi \
         --cc="gcc" || {
             echo "FFmpeg configure failed. Checking config.log..."
             cat ffbuild/config.log
@@ -212,6 +215,9 @@ configure_ffmpeg() {
 # Build FFmpeg
 git clone --depth=1 https://github.com/FFmpeg/FFmpeg.git
 cd FFmpeg
+# Checkout the latest stable version
+git fetch --tags
+git checkout n7.1
 
 # Verify compiler before proceeding
 if ! verify_compiler; then
@@ -226,13 +232,27 @@ echo "Current directory: $(pwd)"
 echo "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
 echo "Install directory: ${INSTALL_DIR}"
 
+# Clean any previous build artifacts
+make clean || true
+make distclean || true
+
 # Configure FFmpeg with platform-specific settings
-configure_ffmpeg
+if ! configure_ffmpeg; then
+    echo "FFmpeg configure failed"
+    exit 1
+fi
+
+# Verify configure succeeded
+if [ ! -f "ffbuild/config.mak" ]; then
+    echo "Error: FFmpeg configure did not create config.mak"
+    exit 1
+fi
 
 # Use number of CPU cores or fallback to 2 if nproc is not available
 NPROC=$(nproc 2>/dev/null || echo 2)
 echo "Building with $NPROC parallel jobs..."
 
+# Build FFmpeg
 make -j"${NPROC}" || {
     echo "FFmpeg make failed"
     exit 1
@@ -242,6 +262,20 @@ make install || {
     echo "FFmpeg installation failed"
     exit 1
 }
+
+# Add this after the make install command, before the validation section
+echo "Verifying FFmpeg build..."
+if ! "${INSTALL_DIR}/bin/ffmpeg" -version &> /dev/null; then
+    echo "Error: FFmpeg binary test failed"
+    exit 1
+fi
+
+# Check library linkage
+echo "Checking library dependencies..."
+if ! ldd "${INSTALL_DIR}/bin/ffmpeg" | grep -q libavutil; then
+    echo "Error: libavutil not properly linked"
+    exit 1
+fi
 
 # Update validation section
 echo "Validating FFmpeg installation..."

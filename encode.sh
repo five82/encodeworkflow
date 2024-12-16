@@ -228,16 +228,15 @@ setup_video_options() {
         echo "UHD quality detected (width: ${width}px), using CRF ${crf}" >&2
     fi
 
-    local video_opts="-c:v libsvtav1 \
+    local video_opts="-vf format=yuv420p10le \
+        -c:v libsvtav1 \
         -preset ${PRESET} \
         -crf ${crf} \
-        -svtav1-params ${SVT_PARAMS} \
-        -pix_fmt ${PIX_FMT}"
+        -svtav1-params ${SVT_PARAMS} "
 
-    # Only add Dolby Vision flag if it was actually detected
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
         video_opts+=" -dolbyvision true"
-        echo "Using Dolby Vision optimized encoding settings" >&2
+        echo "Using Dolby Vision encoding settings" >&2
     else
         echo "Using standard encoding settings" >&2
     fi
@@ -411,49 +410,49 @@ validate_output() {
 
 setup_hwaccel_options() {
     local hwaccel_opts=""
+    local hw_available=false
 
     echo "Checking hardware acceleration support..." >&2
 
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # Skip VideoToolbox for Dolby Vision content on macOS as it's known to fail
-        if [[ "$IS_DOLBY_VISION" == "true" ]]; then
-            echo "Dolby Vision content detected - skipping VideoToolbox (known incompatibility)" >&2
-            return 0
-        fi
-        
-        # macOS: Check for VideoToolbox
         if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "videotoolbox"; then
+            hw_available=true
+            if [[ "$IS_DOLBY_VISION" == "true" ]]; then
+                echo "Hardware acceleration available but skipped (Dolby Vision incompatibility)" >&2
+                return 0
+            fi
             hwaccel_opts="-hwaccel videotoolbox -hwaccel_output_format nv12"
             echo "Enabled VideoToolbox hardware decoding for macOS" >&2
         fi
     elif [[ "$OSTYPE" == "linux"* ]]; then
-        # Linux: Check available hardware
         if command -v lspci >/dev/null 2>&1; then
             if lspci | grep -i "VGA" | grep -qi "NVIDIA"; then
-                # NVIDIA: Check for NVDEC
                 if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "cuda" && \
                    command -v nvidia-smi >/dev/null 2>&1; then
+                    hw_available=true
                     hwaccel_opts="-hwaccel cuda -hwaccel_output_format cuda"
                     echo "Enabled NVIDIA CUDA hardware decoding" >&2
                 fi
             elif lspci | grep -i "VGA" | grep -qi "AMD"; then
-                # AMD: Check for VAAPI
                 if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "vaapi" && \
                    [ -e "/dev/dri/renderD128" ]; then
-                    hwaccel_opts="-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi"
-                    echo "Enabled VAAPI hardware decoding for AMD GPU" >&2
+                    hw_available=true
+                    if ! [[ "$IS_DOLBY_VISION" == "true" ]]; then
+                        hwaccel_opts="-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format nv12"
+                        echo "Enabled VAAPI hardware decoding for AMD GPU" >&2
+                    fi
                 fi
             elif lspci | grep -i "VGA" | grep -qi "Intel"; then
-                # Intel: Check for QSV
                 if "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "qsv" && \
                    [ -e "/dev/dri/renderD128" ]; then
+                    hw_available=true
                     hwaccel_opts="-hwaccel qsv -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format qsv"
                     echo "Enabled QSV hardware decoding for Intel GPU" >&2
                 fi
             fi
         elif [ -f "/proc/device-tree/model" ] && grep -qi "raspberry pi" "/proc/device-tree/model"; then
-            # Raspberry Pi: Check for V4L2M2M
             if [ -e "/dev/video10" ] && "${FFMPEG}" -hide_banner -hwaccels 2>/dev/null | grep -q "v4l2m2m"; then
+                hw_available=true
                 hwaccel_opts="-hwaccel v4l2m2m -hwaccel_device /dev/video10 -hwaccel_output_format nv12"
                 echo "Enabled V4L2M2M hardware decoding for Raspberry Pi" >&2
             fi
@@ -461,7 +460,15 @@ setup_hwaccel_options() {
     fi
 
     if [ -z "$hwaccel_opts" ]; then
-        echo "No supported hardware acceleration found, using software decoding" >&2
+        if [ "$hw_available" = true ]; then
+            if [[ "$IS_DOLBY_VISION" == "true" ]]; then
+                echo "Hardware acceleration available but skipped (Dolby Vision incompatibility)" >&2
+            else
+                echo "Hardware acceleration available but not used" >&2
+            fi
+        else
+            echo "No supported hardware acceleration found, using software decoding" >&2
+        fi
     fi
 
     printf "%s" "${hwaccel_opts}"
@@ -479,7 +486,19 @@ process_file() {
     echo "----------------------------------------"
     echo "Processing: ${filename}"
 
+    # Reset global variables
+    IS_DOLBY_VISION=false
+    HWACCEL_OPTS=""
+
+    # Detect Dolby Vision and set hardware acceleration options
     detect_dolby_vision "${input_file}"
+    
+    if [[ "$IS_DOLBY_VISION" == "true" ]]; then
+        echo "Dolby Vision detected, disabling hardware acceleration."
+    else
+        echo "Standard content detected, checking hardware acceleration."
+        HWACCEL_OPTS=$(setup_hwaccel_options)
+    fi
     
     # Setup encoding options
     audio_opts=$(setup_audio_options "${input_file}")
