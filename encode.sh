@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Add near the top of the script, after the shebang
+export LD_LIBRARY_PATH="/home/linuxbrew/.linuxbrew/lib:${LD_LIBRARY_PATH}"
+
 # Determine the script directory
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS

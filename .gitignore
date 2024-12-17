@@ -22,7 +22,7 @@ Thumbs.db
 videos/
 
 # Build directory
-build/
+ffmpeg_build/
 
 # FFmpeg binaries
 ffmpeg

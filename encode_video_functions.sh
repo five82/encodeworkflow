@@ -43,17 +43,19 @@ setup_video_options() {
         echo "UHD quality detected (width: ${width}px), using CRF ${crf}" >&2
     fi
 
-    local video_opts="-vf format=${PIX_FMT} \
+    local video_opts=""
+    
+    # Standard software encoding
+    video_opts="-vf format=${PIX_FMT} \
         -c:v libsvtav1 \
         -preset ${PRESET} \
         -crf ${crf} \
-        -svtav1-params ${SVT_PARAMS} "
+        -svtav1-params ${SVT_PARAMS}"
+    echo "Using standard encoding settings" >&2
 
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
         video_opts+=" -dolbyvision true"
         echo "Using Dolby Vision encoding settings" >&2
-    else
-        echo "Using standard encoding settings" >&2
     fi
 
     printf "%s" "${video_opts}"
@@ -153,4 +155,20 @@ print_encoding_summary() {
     echo "    - Audio:   ${output_audio_mb} MB"
     echo "  Reduced by:  ${reduction}%"
     echo "----------------------------------------"
+}
+
+# Configure hardware acceleration options
+configure_hw_accel_options() {
+    local hw_options=""
+    
+    case "${HW_ACCEL}" in
+        "videotoolbox")
+            hw_options="-hwaccel videotoolbox"
+            ;;
+        *)
+            hw_options=""
+            ;;
+    esac
+    
+    echo "${hw_options}"
 } 

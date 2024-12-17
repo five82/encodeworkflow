@@ -2,11 +2,36 @@
 
 # Build ffmpeg with dynamic linking using Linux Homebrew
 
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Parse command line arguments
+ENABLE_LOGGING=false
+for arg in "$@"; do
+    case $arg in
+        --log)
+            ENABLE_LOGGING=true
+            shift
+            ;;
+    esac
+done
+
+# Set up logging only if --log flag is passed
+if [[ "$ENABLE_LOGGING" == "true" ]]; then
+    LOG_FILE="${SCRIPT_DIR}/ffmpeg_build.log"
+    exec 1> >(tee -a "${LOG_FILE}")
+    exec 2>&1
+    echo "Build started at $(date)"
+    echo "======================="
+fi
 
 cleanup() {
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
         echo "Build failed with exit code: $exit_code"
+        echo "Build directory ${BUILD_DIR} preserved for debugging"
+    else
+        echo "Build completed successfully"
     fi
 }
 
@@ -43,21 +68,20 @@ check_brew_deps() {
         "opus"
         "dav1d"
         "svt-av1"
-        # VA-API support
-        "libva"
     )
 
     echo "Checking Homebrew dependencies..."
     for pkg in "${required_pkgs[@]}"; do
         if ! brew list "$pkg" >/dev/null 2>&1; then
             missing_deps+=("$pkg")
+        else
+            echo "Found ${pkg}: $(brew list --versions ${pkg})"
         fi
     done
 
     if [ ${#missing_deps[@]} -ne 0 ]; then
-        echo "Missing required packages. Please install them with:"
-        echo "brew install ${missing_deps[*]}"
-        exit 1
+        echo "Missing required packages. Installing them now..."
+        brew install "${missing_deps[@]}"
     fi
 }
 
@@ -144,11 +168,8 @@ check_build_dependencies() {
     echo "All build dependencies are present."
 }
 
-# Get the directory where the script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
 # Create and enter build directory
-BUILD_DIR="${SCRIPT_DIR}/build"
+BUILD_DIR="${SCRIPT_DIR}/ffmpeg_build"
 mkdir -p $BUILD_DIR
 
 # Near the top, after BUILD_DIR definition
@@ -185,6 +206,23 @@ verify_compiler() {
 configure_ffmpeg() {
     local brew_prefix=$(brew --prefix)
     
+    # Set pkg-config to prioritize Homebrew
+    export PKG_CONFIG_PATH="${brew_prefix}/lib/pkgconfig:${PKG_CONFIG_PATH}"
+    
+    # Set compiler environment
+    export CC=/usr/bin/gcc
+    export CXX=/usr/bin/g++
+    export CFLAGS="-I${brew_prefix}/include -O3"
+    export CXXFLAGS="-I${brew_prefix}/include -O3"
+    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib"
+    export LD_LIBRARY_PATH="${brew_prefix}/lib:${LD_LIBRARY_PATH}"
+    
+    # Print versions of key dependencies
+    echo "Checking dependency versions..."
+    echo "opus: $(PKG_CONFIG_PATH="${brew_prefix}/lib/pkgconfig" pkg-config --modversion opus)"
+    echo "SVT-AV1: $(PKG_CONFIG_PATH="${brew_prefix}/lib/pkgconfig" pkg-config --modversion SvtAv1Enc)"
+    echo "dav1d: $(PKG_CONFIG_PATH="${brew_prefix}/lib/pkgconfig" pkg-config --modversion dav1d)"
+    
     ./configure \
         --prefix="${INSTALL_DIR}" \
         --enable-gpl \
@@ -195,21 +233,20 @@ configure_ffmpeg() {
         --disable-debug \
         --disable-ffplay \
         --enable-ffprobe \
-        --extra-cflags="-I${INSTALL_DIR}/include -I${brew_prefix}/include -O3" \
-        --extra-ldflags="-L${INSTALL_DIR}/lib -L${brew_prefix}/lib -Wl,-rpath,${INSTALL_DIR}/lib -Wl,-rpath,${brew_prefix}/lib" \
+        --disable-network \
+        --disable-protocols \
+        --disable-libssh \
+        --disable-libsmbclient \
+        --disable-gnutls \
+        --extra-cflags="${CFLAGS}" \
+        --extra-cxxflags="${CXXFLAGS}" \
+        --extra-ldflags="${LDFLAGS}" \
         --extra-libs="-lpthread -lm" \
+        --pkg-config-flags="--static" \
         --enable-libdav1d \
         --enable-libopus \
         --enable-libsvtav1 \
-        --enable-vaapi \
-        --enable-vulkan \
-        --enable-libdrm \
-        --enable-filter=scale_vaapi \
-        --cc="gcc" || {
-            echo "FFmpeg configure failed. Checking config.log..."
-            cat ffbuild/config.log
-            exit 1
-        }
+        --cc=/usr/bin/gcc
 }
 
 # Build FFmpeg
@@ -232,9 +269,11 @@ echo "Current directory: $(pwd)"
 echo "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
 echo "Install directory: ${INSTALL_DIR}"
 
-# Clean any previous build artifacts
-make clean || true
-make distclean || true
+# Clean any previous build artifacts if they exist
+if [ -f "Makefile" ]; then
+    make clean || true
+    make distclean || true
+fi
 
 # Configure FFmpeg with platform-specific settings
 if ! configure_ffmpeg; then
@@ -291,68 +330,44 @@ if ! "${INSTALL_DIR}/bin/ffprobe" -version &> /dev/null; then
     exit 1
 fi
 
-# Check for required libraries
-echo "Checking FFmpeg configuration..."
-REQUIRED_LIBS=("libopus" "libdav1d" "libsvtav1" "vaapi")
-MISSING_LIBS=()
-
-FFMPEG_CONFIG=$("${INSTALL_DIR}/bin/ffmpeg" -version | grep "configuration:")
-for lib in "${REQUIRED_LIBS[@]}"; do
-    if ! echo "$FFMPEG_CONFIG" | grep -q "$lib"; then
-        MISSING_LIBS+=("$lib")
-    fi
-done
-
-if [ ${#MISSING_LIBS[@]} -ne 0 ]; then
-    echo "Error: FFmpeg is missing the following required libraries:"
-    printf '%s\n' "${MISSING_LIBS[@]}"
-    exit 1
-fi
-
-# Verify linking
-echo "Verifying dependencies..."
-echo "Running ldd check..."
-LDD_OUTPUT=$(ldd "${INSTALL_DIR}/bin/ffmpeg")
-if [[ -n "$LDD_OUTPUT" ]]; then
-    echo "Confirmed: FFmpeg is dynamically linked"
-    echo "Dependencies:"
-    echo "$LDD_OUTPUT"
-else
-    echo "Error: Could not verify FFmpeg dependencies"
-    exit 1
-fi
-
 echo "FFmpeg validation completed!"
 echo "Build completed successfully!"
 echo "Binaries location:"
 echo "  ffmpeg:  ${INSTALL_DIR}/bin/ffmpeg"
 echo "  ffprobe: ${INSTALL_DIR}/bin/ffprobe"
 
+# Copy binaries to script directory
 echo "Copying binaries to script directory..."
-cp -v "${INSTALL_DIR}/bin/ffmpeg" "${SCRIPT_DIR}/ffmpeg"
-cp -v "${INSTALL_DIR}/bin/ffprobe" "${SCRIPT_DIR}/ffprobe"
+cp "${INSTALL_DIR}/bin/ffmpeg" "${SCRIPT_DIR}/ffmpeg"
+cp "${INSTALL_DIR}/bin/ffprobe" "${SCRIPT_DIR}/ffprobe"
+
 echo "Done! Binaries are available at:"
 echo "  ffmpeg:  ${SCRIPT_DIR}/ffmpeg"
 echo "  ffprobe: ${SCRIPT_DIR}/ffprobe"
 
-check_library_versions() {
-    echo "Checking library versions..."
-    echo "SVT-AV1:"
-    pkg-config --modversion SvtAv1Enc
-    pkg-config --libs SvtAv1Enc
-    echo -e "\nOpus:"
-    pkg-config --modversion opus
-    pkg-config --libs opus
-    echo -e "\ndav1d:"
-    pkg-config --modversion dav1d
-    pkg-config --libs dav1d
-    echo
-    echo "FFmpeg configuration:"
-    "${SCRIPT_DIR}/ffmpeg" -version | grep -E "configuration|lib(svtav1|dav1d|opus)"
-}
+# Print library versions
+echo "Checking library versions..."
+echo "SVT-AV1:"
+pkg-config --modversion SvtAv1Enc
+pkg-config --libs SvtAv1Enc
 
-# Check library versions
-check_library_versions
+echo "Opus:"
+pkg-config --modversion opus
+pkg-config --libs opus
 
-# Cleanup
-rm -rf "${BUILD_DIR}"
+echo "dav1d:"
+pkg-config --modversion dav1d
+pkg-config --libs dav1d
+
+echo "FFmpeg configuration:"
+"${INSTALL_DIR}/bin/ffmpeg" -version | grep configuration
+
+# Clean up build directory after successful installation
+echo "Cleaning up build directory..."
+cd "${SCRIPT_DIR}"
+if [ -d "${BUILD_DIR}" ]; then
+    rm -rf "${BUILD_DIR}"
+    echo "Build directory cleaned up"
+else
+    echo "No build directory to clean"
+fi

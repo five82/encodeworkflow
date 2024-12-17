@@ -25,10 +25,16 @@ process_file() {
     detect_dolby_vision "${input_file}"
 
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
-        echo "Dolby Vision detected, disabling hardware acceleration."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo "Dolby Vision detected, disabling hardware acceleration."
+        fi
     else
-        echo "Standard content detected, checking hardware acceleration."
-        HWACCEL_OPTS=$(setup_hwaccel_options)
+        # Only check hardware acceleration on macOS
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo "macOS detected, checking hardware acceleration."
+            check_hardware_acceleration
+            HWACCEL_OPTS=$(configure_hw_accel_options)
+        fi
     fi
 
     # Setup encoding options
@@ -204,4 +210,36 @@ main() {
     done
 
     print_final_summary "$total_start_time"
+}
+
+# Process a single video file
+process_video() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    echo "Processing: $(basename "$input_file")"
+    
+    # Detect Dolby Vision
+    detect_dolby_vision "$input_file"
+    
+    # Check for hardware acceleration only on macOS
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macOS detected, checking hardware acceleration."
+        check_hardware_acceleration
+        HWACCEL_OPTS=$(configure_hw_accel_options)
+    else
+        HWACCEL_OPTS=""
+    fi
+    
+    # Configure audio options
+    setup_audio_options "$input_file"
+    
+    # Configure subtitle options
+    setup_subtitle_options "$input_file"
+    
+    # Configure video options
+    VIDEO_OPTS=$(setup_video_options "$input_file")
+    
+    # Run the encoding
+    run_encoding "$input_file" "$output_file"
 } 
