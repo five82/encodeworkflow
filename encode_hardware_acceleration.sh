@@ -7,8 +7,8 @@
 # Check for hardware acceleration support
 check_hardware_acceleration() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # Check for macOS VideoToolbox support
-        if ffmpeg -hide_banner -hwaccels | grep -q videotoolbox; then
+        # Check for macOS VideoToolbox support using local ffmpeg binary
+        if "${FFMPEG}" -hide_banner -hwaccels | grep -q videotoolbox; then
             echo "Found VideoToolbox hardware acceleration"
             export HW_ACCEL="videotoolbox"
             return 0
