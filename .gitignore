@@ -21,8 +21,9 @@ Thumbs.db
 # videos directory
 videos/
 
-# Build directory
+# ffmpeg directories
 ffmpeg_build/
+ffmpeg_install/
 
 # FFmpeg binaries
 ffmpeg
