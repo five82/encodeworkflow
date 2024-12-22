@@ -25,6 +25,9 @@ HWACCEL_OPTS=""
 # Dolby Vision detection flag
 IS_DOLBY_VISION=false
 
+# Cropping settings
+DISABLE_CROP=false
+
 # Arrays to store encoding information
 declare -a encoded_files
 declare -a encoding_times

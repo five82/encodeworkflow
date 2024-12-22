@@ -40,7 +40,7 @@ process_file() {
     # Setup encoding options
     audio_opts=$(setup_audio_options "${input_file}")
     subtitle_opts=$(setup_subtitle_options "${input_file}")
-    video_opts=$(setup_video_options "${input_file}")
+    video_opts=$(setup_video_options "${input_file}" "${DISABLE_CROP}")
 
     # Format options for display
     local video_display_opts
