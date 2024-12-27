@@ -172,7 +172,7 @@ setup_video_options() {
     if [ "$width" -le 1280 ]; then
         crf=$CRF_SD
         echo "SD quality detected (width: ${width}px), using CRF ${crf}" >&2
-    elif [ "$width" -gt 1920 ]; then
+    elif [ "$width" -le 1920 ]; then
         crf=$CRF_HD
         echo "HD quality detected (width: ${width}px), using CRF ${crf}" >&2
     else
