@@ -4,20 +4,22 @@
 # Video Functions
 ###################
 
+source "${SCRIPT_DIR}/encode_formatting.sh"
+
 # Detect if the input file contains Dolby Vision
 detect_dolby_vision() {
-    echo "Detecting Dolby Vision..."
+    print_check "Checking for Dolby Vision..."
     local file="$1"
 
     local is_dv
     is_dv=$(mediainfo "$file" | grep "Dolby Vision" || true)
 
     if [[ -n "$is_dv" ]]; then
-        echo "Dolby Vision detected"
+        print_check "Dolby Vision detected"
         IS_DOLBY_VISION=true
         return 0
     else
-        echo "Dolby Vision not detected. Continuing with standard encoding..."
+        print_check "Standard HDR/SDR content detected"
         return 1
     fi
 }
@@ -28,11 +30,11 @@ detect_crop() {
     local disable_crop="$2"
 
     if [[ "$disable_crop" == "true" ]]; then
-        echo "✓ Crop detection disabled" >&2
+        print_check "Crop detection disabled"
         return 0
     fi
 
-    echo "✓ Analyzing video for black bars..." >&2
+    print_check "Analyzing video for black bars..."
 
     # Check if input is HDR and get color properties
     local color_transfer color_primaries color_space
@@ -50,7 +52,7 @@ detect_crop() {
        [[ "$color_space" =~ ^(bt2020nc|bt2020c)$ ]]; then
         is_hdr=true
         crop_threshold=128
-        echo "✓ HDR content detected, adjusting detection sensitivity" >&2
+        print_check "HDR content detected, adjusting detection sensitivity"
     fi
 
     # Get maximum pixel value to help determine black level
@@ -105,14 +107,12 @@ detect_crop() {
         total_samples=20
     fi
 
-    echo "✓ Analyzing ${total_samples} frames for black bars..." >&2
+    print_check "Analyzing $(print_stat "${total_samples}") frames for black bars..."
 
     # Get the original dimensions first
     local original_width original_height
     original_width=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${input_file}")
     original_height=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${input_file}")
-
-    echo "Original dimensions: ${original_width}x${original_height}" >&2
 
     # Then run crop detection with HDR-aware threshold
     local crop_values
@@ -140,9 +140,9 @@ detect_crop() {
     local black_bar_percent=$(( black_bar_size * 100 / original_height ))
 
     if [ "$black_bar_size" -gt 0 ]; then
-        echo "✓ Found black bars: ${black_bar_size} pixels (${black_bar_percent}% of height)" >&2
+        print_check "Found black bars: $(print_stat "${black_bar_size} pixels") ($(print_stat "${black_bar_percent}%") of height)"
     else
-        echo "✓ No significant black bars detected" >&2
+        print_check "No significant black bars detected"
     fi
 
     # Return the crop value if black bars are significant (>1% of height)
@@ -156,27 +156,26 @@ detect_crop() {
 # Set up video encoding options based on input file
 setup_video_options() {
     local input_file="$1"
-    local disable_crop="${2:-false}"  # New parameter with default value false
+    local disable_crop="$2"
+    local video_opts=""
 
     # Get video width
     local width
-    width=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$input_file")
+    width=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${input_file}")
 
-    # Set CRF based on video width
+    # Set quality based on resolution
     local crf
-    if [ "$width" -le 1280 ]; then
-        crf=$CRF_SD
-        echo "SD quality detected (width: ${width}px), using CRF ${crf}" >&2
-    elif [ "$width" -le 1920 ]; then
-        crf=$CRF_HD
-        echo "HD quality detected (width: ${width}px), using CRF ${crf}" >&2
-    else
+    if [ "$width" -ge 3840 ]; then
         crf=$CRF_UHD
-        echo "UHD quality detected (width: ${width}px), using CRF ${crf}" >&2
+        print_check "UHD quality detected ($(print_stat "${width}px") width), using CRF $(print_stat "$crf")"
+    elif [ "$width" -ge 1920 ]; then
+        crf=$CRF_HD
+        print_check "HD quality detected ($(print_stat "${width}px") width), using CRF $(print_stat "$crf")"
+    else
+        crf=$CRF_SD
+        print_check "SD quality detected ($(print_stat "${width}px") width), using CRF $(print_stat "$crf")"
     fi
 
-    local video_opts=""
-    
     # Detect crop values
     local crop_filter
     crop_filter=$(detect_crop "${input_file}" "${disable_crop}")
@@ -186,18 +185,16 @@ setup_video_options() {
     if [[ -n "$crop_filter" ]]; then
         vf_filters="${crop_filter},${vf_filters}"
     fi
-    
+
     # Standard software encoding
     video_opts="-vf ${vf_filters} \
         -c:v libsvtav1 \
         -preset ${PRESET} \
         -crf ${crf} \
         -svtav1-params ${SVT_PARAMS}"
-    echo "Using standard encoding settings" >&2
 
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
         video_opts+=" -dolbyvision true"
-        echo "Using Dolby Vision encoding settings" >&2
     fi
 
     printf "%s" "${video_opts}"

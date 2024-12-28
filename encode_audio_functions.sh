@@ -4,6 +4,8 @@
 # Audio Functions
 ###################
 
+source "${SCRIPT_DIR}/encode_formatting.sh"
+
 # Set up audio encoding options based on input file
 setup_audio_options() {
     local input_file="$1"
@@ -15,18 +17,18 @@ setup_audio_options() {
     audio_stream_count=$("${FFPROBE}" -v error -select_streams a -show_entries stream=index -of csv=p=0 "${input_file}" | wc -l)
 
     if [ "$audio_stream_count" -eq 0 ]; then
-        echo "No audio streams found" >&2
+        print_warning "No audio streams found"
         return 0
     fi
 
     # Get audio channels for each stream
     IFS=$'\n' read -r -d '' -a audio_channels < <("${FFPROBE}" -v error -select_streams a -show_entries stream=channels -of csv=p=0 "${input_file}" && printf '\0')
-    echo "Detected audio channels: ${audio_channels[@]}" >&2
+    print_check "Found $(print_stat "${audio_channels[@]}") audio channels"
 
     for num_channels in "${audio_channels[@]}"; do
         # Skip empty or invalid streams
         if [ -z "$num_channels" ] || [ "$num_channels" -eq 0 ]; then
-            echo "Skipping invalid audio stream $stream_index" >&2
+            print_warning "Skipping invalid audio stream $stream_index"
             continue
         fi
 
@@ -36,7 +38,7 @@ setup_audio_options() {
             2)  bitrate="128k"; layout="stereo" ;;
             6)  bitrate="256k"; layout="5.1" ;;
             8)  bitrate="384k"; layout="7.1" ;;
-            *)  echo "Unsupported channel count ($num_channels) for stream $stream_index, defaulting to stereo" >&2
+            *)  print_warning "Unsupported channel count ($(print_stat "$num_channels")) for stream $stream_index, defaulting to stereo"
                 num_channels=2
                 bitrate="128k"
                 layout="stereo"
@@ -58,10 +60,9 @@ setup_audio_options() {
         audio_opts+=" -vbr:a:${stream_index} on"
         audio_opts+=" -compression_level:a:${stream_index} 10"
 
-        echo "Configured audio stream $stream_index: ${num_channels} channels, ${layout} layout, ${bitrate} bitrate" >&2
+        print_check "Configured audio stream $(print_stat "$stream_index"): $(print_stat "${num_channels} channels"), $(print_stat "${layout} layout"), $(print_stat "${bitrate} bitrate")"
         ((stream_index++))
     done
 
-    echo "Final audio options: ${audio_opts}" >&2
     printf "%s" "${audio_opts}"
 } 

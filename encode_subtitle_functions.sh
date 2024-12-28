@@ -4,6 +4,8 @@
 # Subtitle Functions
 ###################
 
+source "${SCRIPT_DIR}/encode_formatting.sh"
+
 # Set up subtitle options based on input file
 setup_subtitle_options() {
     local input_file="$1"
@@ -14,9 +16,9 @@ setup_subtitle_options() {
 
     if [ "$subtitle_count" -gt 0 ]; then
         subtitle_opts="-c:s copy"
-        echo "Found $subtitle_count subtitle stream(s), will copy them" >&2
+        print_check "Found $(print_stat "$subtitle_count") subtitle stream(s)"
     else
-        echo "No subtitle streams found" >&2
+        print_check "No subtitle streams found"
     fi
 
     printf "%s" "${subtitle_opts}"

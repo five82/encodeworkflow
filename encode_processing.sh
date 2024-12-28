@@ -4,6 +4,28 @@
 # Encoding Functions
 ###################
 
+source "${SCRIPT_DIR}/encode_formatting.sh"
+
+# Print section header with nice formatting
+print_header() {
+    local title="$1"
+    local width=80
+    local padding=$(( (width - ${#title}) / 2 ))
+    
+    echo
+    printf '%*s' "$width" | tr ' ' '='
+    echo
+    printf "%*s%s%*s\n" "$padding" "" "$title" "$padding" ""
+    printf '%*s' "$width" | tr ' ' '='
+    echo
+    echo
+}
+
+# Print section separator
+print_separator() {
+    echo "----------------------------------------"
+}
+
 # Process a single file (perform encoding)
 process_file() {
     local input_file="$1"
@@ -11,11 +33,12 @@ process_file() {
     local log_file="$3"
     local filename="$4"
 
-    echo "Starting encode at $(date)"
-    echo "Input file: ${input_file}"
-    echo "Output file: ${output_file}"
-    echo "----------------------------------------"
-    echo "Processing: ${filename}"
+    print_header "Starting Encode"
+    
+    echo "Input file:  $(print_path "${input_file}")"
+    echo "Output file: $(print_path "${output_file}")"
+    print_separator
+    echo "Processing: $(print_path "${filename}")"
 
     # Reset global variables
     IS_DOLBY_VISION=false
@@ -26,12 +49,12 @@ process_file() {
 
     if [[ "$IS_DOLBY_VISION" == "true" ]]; then
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            echo "Dolby Vision detected, disabling hardware acceleration."
+            print_warning "Dolby Vision detected, disabling hardware acceleration"
         fi
     else
         # Only check hardware acceleration on macOS
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            echo "macOS detected, checking hardware acceleration."
+            print_check "Checking hardware acceleration capabilities"
             check_hardware_acceleration
             HWACCEL_OPTS=$(configure_hw_accel_options)
         fi
@@ -53,16 +76,21 @@ process_file() {
     subtitle_display_opts=$(echo "${subtitle_opts}" | sed 's/-c:s/    -c:s/; s/ -/\\\n    -/g')
 
     # Log the ffmpeg command with proper formatting
+    print_header "FFmpeg Command"
+    
     cat <<-EOF | tee -a "${log_file}"
-    Running ffmpeg command:
-    ${FFMPEG} -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \\
-        -map 0:v:0 \\
-    ${video_display_opts} \\
-    ${audio_display_opts} \\
-    ${subtitle_display_opts} \\
-        -stats \\
-        -y "${output_file}"
+${FFMPEG} -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \\
+    -map 0:v:0 \\
+${video_display_opts} \\
+${audio_display_opts} \\
+${subtitle_display_opts} \\
+    -stats \\
+    -y "${output_file}"
 EOF
+
+    print_header "Encoding Progress"
+    echo "[1/1] Processing: $(print_path "${filename}")"
+    echo
 
     # Execute the actual ffmpeg command
     "${FFMPEG}" -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \
@@ -77,7 +105,7 @@ EOF
 
     # If hardware acceleration fails, retry with software decoding
     if [ $encode_status -ne 0 ] && [ -n "${HWACCEL_OPTS}" ]; then
-        echo "Hardware acceleration failed, falling back to software decoding..." >&2
+        print_warning "Hardware acceleration failed, falling back to software decoding..."
 
         "${FFMPEG}" -hide_banner -loglevel warning -i "${input_file}" \
             -map 0:v:0 \
@@ -91,10 +119,13 @@ EOF
     fi
 
     # Validate the output
+    echo
+    print_check "Validating output file..."
     if [ $encode_status -eq 0 ] && validate_output "${output_file}"; then
+        print_check "Output validation successful"
         return 0
     else
-        echo "Error: Encoding or validation failed for ${filename}" >&2
+        print_error "Encoding or validation failed for ${filename}"
         rm -f "${output_file}"  # Remove invalid output
         return 1
     fi
@@ -154,11 +185,11 @@ print_completion_message() {
     minutes=$(( (elapsed_time % 3600) / 60 ))
     seconds=$((elapsed_time % 60))
 
-    echo "----------------------------------------"
+    print_separator
     echo "Completed: ${filename}"
-    echo "Encoding time: ${hours}h ${minutes}m ${seconds}s"
+    printf "Encoding time: %02dh %02dm %02ds\n" "$hours" "$minutes" "$seconds"
     echo "Finished encode at $(date)"
-    echo "----------------------------------------"
+    print_separator
 }
 
 # Print the final summary after processing all files
@@ -173,14 +204,14 @@ print_final_summary() {
     total_minutes=$(( (total_elapsed_time % 3600) / 60 ))
     total_seconds=$((total_elapsed_time % 60))
 
-    echo "All files processed successfully!"
-    echo "----------------------------------------"
-    echo "Encoding Summary:"
-    echo "----------------------------------------"
+    print_header "Encoding Summary"
+    
     for i in "${!encoded_files[@]}"; do
         print_encoding_summary "$i"
     done
-    echo "Total execution time: ${total_hours}h ${total_minutes}m ${total_seconds}s"
+    
+    print_separator
+    printf "Total execution time: %02dh %02dm %02ds\n" "$total_hours" "$total_minutes" "$total_seconds"
 }
 
 # Main processing function
