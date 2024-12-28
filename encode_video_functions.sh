@@ -28,11 +28,11 @@ detect_crop() {
     local disable_crop="$2"
 
     if [[ "$disable_crop" == "true" ]]; then
-        echo "Crop detection disabled" >&2
+        echo "✓ Crop detection disabled" >&2
         return 0
     fi
 
-    echo "Detecting vertical black bars..." >&2
+    echo "✓ Analyzing video for black bars..." >&2
 
     # Check if input is HDR and get color properties
     local color_transfer color_primaries color_space
@@ -49,9 +49,8 @@ detect_crop() {
        [[ "$color_primaries" =~ ^(bt2020)$ ]] || \
        [[ "$color_space" =~ ^(bt2020nc|bt2020c)$ ]]; then
         is_hdr=true
-        # Start with a higher threshold for HDR
         crop_threshold=128
-        echo "HDR content detected (Transfer: ${color_transfer}, Primaries: ${color_primaries}, Space: ${color_space})" >&2
+        echo "✓ HDR content detected, adjusting detection sensitivity" >&2
     fi
 
     # Get maximum pixel value to help determine black level
@@ -66,45 +65,34 @@ detect_crop() {
 
         # Adjust threshold based on measured black level
         crop_threshold=$((black_level * 3 / 2))  # Multiply by 1.5 using integer arithmetic
-        echo "Adjusted crop threshold to ${crop_threshold} based on measured black level ${black_level}" >&2
     fi
 
-    # Ensure threshold is within reasonable bounds (using integer arithmetic)
+    # Ensure threshold is within reasonable bounds
     if [ "$crop_threshold" -lt 16 ]; then
         crop_threshold=16
     elif [ "$crop_threshold" -gt 256 ]; then
         crop_threshold=256
     fi
 
-    echo "Using crop detection threshold: ${crop_threshold}" >&2
-
     # Sample the video at different intervals
     local duration
     duration=$("${FFPROBE}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file")
-    # Convert floating point duration to integer seconds
     duration=$(printf "%.0f" "$duration")
     
     # Skip credits based on content length
     local credits_skip=0
     if [ "$duration" -gt 3600 ]; then
-        # Movies (>1 hour): Skip 3 minutes
-        credits_skip=180
+        credits_skip=180  # Movies (>1 hour): Skip 3 minutes
     elif [ "$duration" -gt 1200 ]; then
-        # Long content (>20 minutes): Skip 1 minute
-        credits_skip=60
+        credits_skip=60   # Long content (>20 minutes): Skip 1 minute
     elif [ "$duration" -gt 300 ]; then
-        # Medium content (>5 minutes): Skip 30 seconds
-        credits_skip=30
+        credits_skip=30   # Medium content (>5 minutes): Skip 30 seconds
     fi
-    # Short content (<5 minutes): Don't skip anything
 
     if [ "$credits_skip" -gt 0 ]; then
         if [ "$duration" -gt "$credits_skip" ]; then
             duration=$((duration - credits_skip))
-            echo "Content duration: ${duration}s, skipping last ${credits_skip}s to avoid end credits" >&2
         fi
-    else
-        echo "Short content detected (${duration}s), analyzing entire duration" >&2
     fi
     
     local interval=5  # Check every 5 seconds
@@ -117,7 +105,7 @@ detect_crop() {
         total_samples=20
     fi
 
-    echo "Analyzing video with $total_samples samples at ${interval}s intervals..." >&2
+    echo "✓ Analyzing ${total_samples} frames for black bars..." >&2
 
     # Get the original dimensions first
     local original_width original_height
@@ -135,12 +123,7 @@ detect_crop() {
                  awk '/crop/ { print $NF }' | \
                  grep "^crop=${original_width}:")  # Only consider crops that maintain original width
 
-    # Debug output
-    echo "Raw crop values:" >&2
-    echo "$crop_values" >&2
-
     # Analyze all crop heights and their frequencies
-    echo "Analyzing aspect ratio distribution..." >&2
     local heights_analysis
     heights_analysis=$(echo "$crop_values" | \
         awk -F':' '{print $2}' | \
@@ -148,57 +131,26 @@ detect_crop() {
         awk -v min=100 '$1 >= min' | \
         sort | uniq -c | sort -nr)
 
-    # Print aspect ratio distribution
-    echo "Height distribution (frequency : height):" >&2
-    echo "$heights_analysis" >&2
+    # Get the most common height
+    local most_common_height
+    most_common_height=$(echo "$heights_analysis" | head -n1 | awk '{print $2}')
 
-    # Find heights that occur at least 15% of the time
-    local actual_samples=$(echo "$heights_analysis" | awk '{sum += $1} END {print sum}')
-    local min_frequency=$((actual_samples * 15 / 100))  # 15% threshold
-    
-    echo "Planned samples: $total_samples" >&2
-    echo "Actual samples analyzed: $actual_samples" >&2
-    echo "Requiring at least $min_frequency samples (15%) to consider a height value" >&2
+    # Calculate black bar size
+    local black_bar_size=$(( (original_height - most_common_height) / 2 ))
+    local black_bar_percent=$(( black_bar_size * 100 / original_height ))
 
-    # Get the largest height that occurs frequently
-    local target_height
-    target_height=$(echo "$heights_analysis" | \
-        awk -v min="$min_frequency" -v orig="$original_height" '
-        $1 >= min && $2 > 100 && $2 < orig {
-            if (!max || $2 > max) max = $2
-            printf "Height %d appears in %d samples (%.1f%%)\n", $2, $1, ($1/total*100) > "/dev/stderr"
-        }
-        END {
-            if (max) print max
-        }' total="$actual_samples")
-
-    if [[ -n "$target_height" && "$target_height" -gt 0 ]]; then
-        # Get the corresponding crop value for this height
-        local crop_line
-        crop_line=$(echo "$crop_values" | grep ":${target_height}:" | head -n1)
-        
-        if [[ -n "$crop_line" ]]; then
-            local width height x y
-            IFS=':' read -r width height x y <<< "${crop_line#*=}"
-
-            # Only proceed if width matches original width
-            if [[ "$width" -eq "$original_width" && "$height" -gt 100 && "$height" -lt "$original_height" ]]; then
-                local total_crop=$((original_height - height))
-                local min_crop_threshold=20
-
-                if [[ $total_crop -ge $min_crop_threshold ]]; then
-                    echo "Original height: ${original_height}" >&2
-                    echo "Cropped height: ${height}" >&2
-                    echo "Detected vertical black bars - will remove $total_crop pixels ($((total_crop/2)) from top and bottom)" >&2
-                    printf "crop=%d:%d:%d:%d" "$original_width" "$height" "0" "$y"
-                    return 0
-                fi
-            fi
-        fi
+    if [ "$black_bar_size" -gt 0 ]; then
+        echo "✓ Found black bars: ${black_bar_size} pixels (${black_bar_percent}% of height)" >&2
+    else
+        echo "✓ No significant black bars detected" >&2
     fi
 
-    echo "No significant consistent vertical black bars detected" >&2
-    return 0
+    # Return the crop value if black bars are significant (>1% of height)
+    if [ "$black_bar_percent" -gt 1 ]; then
+        echo "crop=${original_width}:${most_common_height}:0:${black_bar_size}"
+    else
+        echo "crop=${original_width}:${original_height}:0:0"
+    fi
 }
 
 # Set up video encoding options based on input file
