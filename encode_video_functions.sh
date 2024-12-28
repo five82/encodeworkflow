@@ -34,16 +34,49 @@ detect_crop() {
 
     echo "Detecting vertical black bars..." >&2
 
-    # Check if input is HDR
-    local is_hdr
-    is_hdr=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=color_transfer -of default=noprint_wrappers=1:nokey=1 "$input_file" | grep -i "smpte2084\|arib-std-b67" || true)
+    # Check if input is HDR and get color properties
+    local color_transfer color_primaries color_space
+    color_transfer=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=color_transfer -of default=noprint_wrappers=1:nokey=1 "$input_file")
+    color_primaries=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=color_primaries -of default=noprint_wrappers=1:nokey=1 "$input_file")
+    color_space=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=color_space -of default=noprint_wrappers=1:nokey=1 "$input_file")
 
-    # Adjust cropdetect threshold based on HDR status
+    # Set initial crop threshold
     local crop_threshold=16
-    if [[ -n "$is_hdr" ]]; then
-        echo "HDR content detected, adjusting crop detection threshold" >&2
-        crop_threshold=128  # Higher threshold for HDR content
+    local is_hdr=false
+
+    # Check for various HDR formats
+    if [[ "$color_transfer" =~ ^(smpte2084|arib-std-b67|smpte428|bt2020-10|bt2020-12)$ ]] || \
+       [[ "$color_primaries" =~ ^(bt2020)$ ]] || \
+       [[ "$color_space" =~ ^(bt2020nc|bt2020c)$ ]]; then
+        is_hdr=true
+        # Start with a higher threshold for HDR
+        crop_threshold=128
+        echo "HDR content detected (Transfer: ${color_transfer}, Primaries: ${color_primaries}, Space: ${color_space})" >&2
     fi
+
+    # Get maximum pixel value to help determine black level
+    if [[ "$is_hdr" == "true" ]]; then
+        # Sample a few frames to find the typical black level
+        local black_level
+        black_level=$("${FFMPEG}" -hide_banner -i "${input_file}" \
+            -vf "select='eq(n,0)+eq(n,100)+eq(n,200)',blackdetect=d=0:pic_th=0.1" \
+            -f null - 2>&1 | \
+            grep "black_level" | \
+            awk -F: '{sum += $2; count++} END {if(count>0) print int(sum/count); else print 128}')
+
+        # Adjust threshold based on measured black level
+        crop_threshold=$((black_level * 3 / 2))  # Multiply by 1.5 using integer arithmetic
+        echo "Adjusted crop threshold to ${crop_threshold} based on measured black level ${black_level}" >&2
+    fi
+
+    # Ensure threshold is within reasonable bounds (using integer arithmetic)
+    if [ "$crop_threshold" -lt 16 ]; then
+        crop_threshold=16
+    elif [ "$crop_threshold" -gt 256 ]; then
+        crop_threshold=256
+    fi
+
+    echo "Using crop detection threshold: ${crop_threshold}" >&2
 
     # Sample the video at different intervals
     local duration
@@ -86,22 +119,33 @@ detect_crop() {
 
     echo "Analyzing video with $total_samples samples at ${interval}s intervals..." >&2
 
-    # Run crop detection with HDR-aware threshold
+    # Get the original dimensions first
+    local original_width original_height
+    original_width=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${input_file}")
+    original_height=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${input_file}")
+
+    echo "Original dimensions: ${original_width}x${original_height}" >&2
+
+    # Then run crop detection with HDR-aware threshold
     local crop_values
     crop_values=$("${FFMPEG}" -hide_banner -i "${input_file}" \
-                 -vf "select='lt(t,${duration})*not(mod(t,${interval}))',cropdetect=limit=${crop_threshold}:round=2:reset=1" \
+                 -vf "select='not(mod(n,30))',cropdetect=limit=${crop_threshold}:round=2:reset=1" \
+                 -frames:v $((total_samples * 2)) \
                  -f null - 2>&1 | \
-                 awk '/crop/ { print $NF }')
+                 awk '/crop/ { print $NF }' | \
+                 grep "^crop=${original_width}:")  # Only consider crops that maintain original width
 
-    # Get the original height
-    local original_height
-    original_height=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${input_file}")
+    # Debug output
+    echo "Raw crop values:" >&2
+    echo "$crop_values" >&2
 
     # Analyze all crop heights and their frequencies
     echo "Analyzing aspect ratio distribution..." >&2
     local heights_analysis
     heights_analysis=$(echo "$crop_values" | \
         awk -F':' '{print $2}' | \
+        grep -v '^$' | \
+        awk -v min=100 '$1 >= min' | \
         sort | uniq -c | sort -nr)
 
     # Print aspect ratio distribution
@@ -120,7 +164,7 @@ detect_crop() {
     local target_height
     target_height=$(echo "$heights_analysis" | \
         awk -v min="$min_frequency" -v orig="$original_height" '
-        $1 >= min && $2 < orig {
+        $1 >= min && $2 > 100 && $2 < orig {
             if (!max || $2 > max) max = $2
             printf "Height %d appears in %d samples (%.1f%%)\n", $2, $1, ($1/total*100) > "/dev/stderr"
         }
@@ -137,19 +181,18 @@ detect_crop() {
             local width height x y
             IFS=':' read -r width height x y <<< "${crop_line#*=}"
 
-            local total_crop=$((original_height - height))
-            local min_crop_threshold=20
+            # Only proceed if width matches original width
+            if [[ "$width" -eq "$original_width" && "$height" -gt 100 && "$height" -lt "$original_height" ]]; then
+                local total_crop=$((original_height - height))
+                local min_crop_threshold=20
 
-            if [[ $total_crop -ge $min_crop_threshold ]]; then
-                local aspect_ratio_original=$(echo "scale=2; $width/$original_height" | bc)
-                local aspect_ratio_cropped=$(echo "scale=2; $width/$height" | bc)
-                
-                echo "Original aspect ratio: $aspect_ratio_original" >&2
-                echo "Cropped aspect ratio: $aspect_ratio_cropped" >&2
-                echo "Detected vertical black bars - original height: ${original_height}, cropped height: ${height}" >&2
-                echo "Crop will remove $total_crop pixels ($((total_crop/2)) from top and bottom)" >&2
-                printf "crop=in_w:%d:%d:%d" "$height" "0" "$y"
-                return 0
+                if [[ $total_crop -ge $min_crop_threshold ]]; then
+                    echo "Original height: ${original_height}" >&2
+                    echo "Cropped height: ${height}" >&2
+                    echo "Detected vertical black bars - will remove $total_crop pixels ($((total_crop/2)) from top and bottom)" >&2
+                    printf "crop=%d:%d:%d:%d" "$original_width" "$height" "0" "$y"
+                    return 0
+                fi
             fi
         fi
     fi
