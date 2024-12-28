@@ -115,7 +115,7 @@ for ((i=1; i<=$NUM_CLIPS; i++)); do
     
     # Create clip using ffmpeg with stream copy (no transcoding)
     ffmpeg -ss "$START_TIME" -i "$INPUT_VIDEO" -t "$CLIP_DURATION" \
-        -c copy -map_chapters -1 -avoid_negative_ts 1 \
+        -c copy -map 0 -map_chapters -1 -avoid_negative_ts 1 \
         "$OUTPUT_FILE" -y 2>/dev/null
         
     if [ $? -eq 0 ]; then
