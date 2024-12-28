@@ -228,7 +228,7 @@ main() {
 
     # Get input files
     local files
-    IFS=$'\n' read -r -d '' -a files < <(find "${INPUT_DIR}" -type f \( -iname "*.mkv" -o -iname "*.mp4" \) -print0 | xargs -0 -n1 echo)
+    IFS=$'\n' read -r -d '' -a files < <(find "${INPUT_DIR}" -type f \( -iname "*.mkv" -o -iname "*.mp4" \) ! -name "._*" -print0 | xargs -0 -n1 echo)
 
     if [ ${#files[@]} -eq 0 ]; then
         echo "No video files found in ${INPUT_DIR}"
