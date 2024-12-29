@@ -370,6 +370,12 @@ encode_segments() {
             local segment_name=$(basename "$segment")
             local output_segment="${output_dir}/${segment_name}"
             
+            # Skip if output segment already exists and has non-zero size
+            if [[ -f "$output_segment" ]] && [[ -s "$output_segment" ]]; then
+                print_check "Segment already encoded successfully: ${segment_name}"
+                continue
+            fi
+            
             print_check "Encoding segment: ${segment_name}"
             
             # Only pass crop filter if it's not empty
@@ -378,7 +384,7 @@ encode_segments() {
                 vfilter_args="--vfilter $crop_filter"
             fi
             
-            # Use ab-av1 for encoding with target VMAF
+            # First attempt with default settings
             if ! ab-av1 auto-encode \
                 --input "$segment" \
                 --output "$output_segment" \
@@ -392,9 +398,48 @@ encode_segments() {
                 --vmaf "n_subsample=8:pool=harmonic_mean" \
                 $vfilter_args \
                 --verbose; then
-                error "Failed to encode segment: $segment_name"
-                error=1
-                break
+                
+                print_check "First attempt failed, retrying with more samples..."
+                
+                # Second attempt with more samples
+                if ! ab-av1 auto-encode \
+                    --input "$segment" \
+                    --output "$output_segment" \
+                    --encoder libsvtav1 \
+                    --min-vmaf "$target_vmaf" \
+                    --preset "$PRESET" \
+                    --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                    --keyint 10s \
+                    --samples 6 \
+                    --sample-duration "2s" \
+                    --vmaf "n_subsample=8:pool=harmonic_mean" \
+                    $vfilter_args \
+                    --verbose; then
+                    
+                    print_check "Second attempt failed, trying with slightly lower VMAF target..."
+                    
+                    # Final attempt with lower VMAF target
+                    local lower_vmaf=$((target_vmaf - 2))
+                    if ! ab-av1 auto-encode \
+                        --input "$segment" \
+                        --output "$output_segment" \
+                        --encoder libsvtav1 \
+                        --min-vmaf "$lower_vmaf" \
+                        --preset "$PRESET" \
+                        --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                        --keyint 10s \
+                        --samples 6 \
+                        --sample-duration "2s" \
+                        --vmaf "n_subsample=8:pool=harmonic_mean" \
+                        $vfilter_args \
+                        --verbose; then
+                        error "Failed to encode segment after all attempts: $segment_name"
+                        error=1
+                        break
+                    else
+                        print_check "Successfully encoded segment with VMAF target $lower_vmaf"
+                    fi
+                fi
             fi
         fi
     done
