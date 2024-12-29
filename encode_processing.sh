@@ -58,8 +58,6 @@ process_file() {
     fi
 
     if [[ "$IS_DOLBY_VISION" == false ]] && [[ "$ENABLE_CHUNKED_ENCODING" == true ]]; then
-        print_check "Using chunked encoding process..."
-        
         # Detect crop values once for the entire video
         local crop_filter
         crop_filter=$(detect_crop "$input_file" "$DISABLE_CROP")

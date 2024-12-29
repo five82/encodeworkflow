@@ -86,3 +86,33 @@ format_size() {
 error() {
     echo -e "\e[31m✗ $1\e[0m" >&2
 }
+
+# Check if GNU Parallel is installed and provide installation instructions if needed
+check_parallel_installation() {
+    if ! command -v parallel >/dev/null 2>&1; then
+        error "GNU Parallel is not installed"
+        
+        # Check if we're on macOS or Linux
+        if [[ "$(uname)" == "Darwin" ]] || [[ "$(uname)" == "Linux" ]]; then
+            # Check if Homebrew is installed
+            if command -v brew >/dev/null 2>&1; then
+                echo "You can install GNU Parallel using Homebrew:"
+                echo "    brew install parallel"
+            else
+                echo "Homebrew is not installed. You can install it first:"
+                if [[ "$(uname)" == "Darwin" ]]; then
+                    echo "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+                else
+                    echo "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+                    echo "    (echo; echo 'eval \"\$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\"') >> \"$HOME/.bashrc\""
+                fi
+                echo "Then install GNU Parallel:"
+                echo "    brew install parallel"
+            fi
+        else
+            echo "Please install GNU Parallel using your system's package manager"
+        fi
+        return 1
+    fi
+    return 0
+}
