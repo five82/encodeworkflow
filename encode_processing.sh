@@ -163,16 +163,22 @@ process_audio_track() {
     local num_channels
     num_channels=$("${FFPROBE}" -v error -select_streams "a:${track_index}" \
         -show_entries stream=channels -of csv=p=0 "$input_file")
+    
+    print_check "Found ${num_channels} audio channels"
 
     # Determine bitrate based on channel count
     local bitrate
+    local layout
     case $num_channels in
-        1)  bitrate=64 ;;   # Mono
-        2)  bitrate=128 ;;  # Stereo
-        6)  bitrate=256 ;;  # 5.1
-        8)  bitrate=384 ;;  # 7.1
-        *)  bitrate=$((num_channels * 48)) ;;
+        1)  bitrate=64; layout="mono" ;;
+        2)  bitrate=128; layout="stereo" ;;
+        6)  bitrate=256; layout="5.1" ;;
+        8)  bitrate=384; layout="7.1" ;;
+        *)  bitrate=$((num_channels * 48)); layout="custom" ;;
     esac
+
+    print_check "Configured audio stream ${track_index}: ${num_channels} channels, ${layout} layout, ${bitrate}k bitrate"
+    print_check "Using codec: libopus (VBR mode, compression level 10)"
 
     # Encode audio track
     if ! "${FFMPEG}" -hide_banner -loglevel warning \
