@@ -28,8 +28,20 @@ IS_DOLBY_VISION=false
 # Cropping settings
 DISABLE_CROP=false
 
+# Chunked encoding settings
+ENABLE_CHUNKED_ENCODING=true
+SEGMENT_LENGTH=15
+TARGET_VMAF=93
+VMAF_SAMPLE_COUNT=3
+VMAF_SAMPLE_LENGTH=1
+
+# Temporary directories for chunked encoding
+SEGMENTS_DIR="${SCRIPT_DIR}/videos/segments"
+ENCODED_SEGMENTS_DIR="${SCRIPT_DIR}/videos/encoded_segments"
+WORKING_DIR="${SCRIPT_DIR}/videos/working"
+
 # Arrays to store encoding information
 declare -a encoded_files
 declare -a encoding_times
 declare -a input_sizes
-declare -a output_sizes 
+declare -a output_sizes
