@@ -15,6 +15,7 @@ if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
         MAGENTA="$(tput setaf 5)"
         CYAN="$(tput setaf 6)"
         WHITE="$(tput setaf 7)"
+        RED="$(tput setaf 1)"
         
         # Bold + color combinations
         BOLD_GREEN="${BOLD}${GREEN}"
@@ -23,6 +24,7 @@ if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
         BOLD_MAGENTA="${BOLD}${MAGENTA}"
         BOLD_CYAN="${BOLD}${CYAN}"
         BOLD_WHITE="${BOLD}${WHITE}"
+        BOLD_RED="${BOLD}${RED}"
     fi
 fi
 
@@ -39,6 +41,11 @@ print_warning() {
 # Print an error message in red
 print_error() {
     echo -e "${BOLD_RED}✗${RESET} ${BOLD}$*${RESET}" >&2
+}
+
+# Print a success message
+print_success() {
+    echo -e "${GREEN}✓${RESET} ${GREEN}$*${RESET}" >&2
 }
 
 # Print a section header

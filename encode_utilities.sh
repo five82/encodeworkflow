@@ -80,4 +80,9 @@ format_size() {
     done
 
     echo "$size"
-} 
+}
+
+# Print an error message
+error() {
+    echo -e "\e[31m✗ $1\e[0m" >&2
+}

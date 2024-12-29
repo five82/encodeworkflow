@@ -52,6 +52,16 @@ validate_output() {
         error=1
     fi
 
+    # Check if ab-av1 is available when chunked encoding is enabled
+    if [[ "$ENABLE_CHUNKED_ENCODING" == "true" ]]; then
+        print_check "Checking for ab-av1..."
+        if ! command -v ab-av1 >/dev/null 2>&1; then
+            error "ab-av1 is required for chunked encoding but not found. Install with: cargo install ab-av1"
+            error=1
+        fi
+        print_check "ab-av1 found"
+    fi
+
     if [ $error -eq 0 ]; then
         echo "Output validation successful"
         return 0
@@ -60,3 +70,16 @@ validate_output() {
         return 1
     fi
 } 
+
+# Check if ab-av1 is available when chunked encoding is enabled
+validate_ab_av1() {
+    if [[ "$ENABLE_CHUNKED_ENCODING" == "true" ]]; then
+        print_check "Checking for ab-av1..."
+        if ! command -v ab-av1 >/dev/null 2>&1; then
+            error "ab-av1 is required for chunked encoding but not found. Install with: cargo install ab-av1"
+            return 1
+        fi
+        print_check "ab-av1 found"
+    fi
+    return 0
+}

@@ -46,89 +46,193 @@ process_file() {
 
     # Detect Dolby Vision and set hardware acceleration options
     detect_dolby_vision "${input_file}"
+    HWACCEL_OPTS=$(configure_hw_accel_options)
 
-    if [[ "$IS_DOLBY_VISION" == "true" ]]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            print_warning "Dolby Vision detected, disabling hardware acceleration"
-        fi
-    else
-        # Only check hardware acceleration on macOS
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            print_check "Checking hardware acceleration capabilities"
-            check_hardware_acceleration
-            HWACCEL_OPTS=$(configure_hw_accel_options)
-        fi
+    # Get number of audio tracks
+    local num_audio_tracks
+    num_audio_tracks=$("${FFPROBE}" -v error -select_streams a -show_entries stream=index -of csv=p=0 "$input_file" | wc -l)
+
+    # Process based on content type and chunked encoding setting
+    if [[ "$IS_DOLBY_VISION" == true ]]; then
+        print_check "Processing Dolby Vision content..."
     fi
 
-    # Setup encoding options
-    audio_opts=$(setup_audio_options "${input_file}")
-    subtitle_opts=$(setup_subtitle_options "${input_file}")
+    if [[ "$IS_DOLBY_VISION" == false ]] && [[ "$ENABLE_CHUNKED_ENCODING" == true ]]; then
+        print_check "Using chunked encoding process..."
+        
+        # Detect crop values once for the entire video
+        local crop_filter
+        crop_filter=$(detect_crop "$input_file" "$DISABLE_CROP")
+
+        # Create temporary directories
+        cleanup_temp_files
+
+        # Step 1: Segment video
+        segment_video "$input_file" "$SEGMENTS_DIR"
+
+        # Step 2: Encode segments
+        if ! encode_segments "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TARGET_VMAF" "$DISABLE_CROP" "$crop_filter"; then
+            error "Failed to encode segments"
+            cleanup_temp_files "$TEMP_DIR"
+            return 1
+        fi
+
+        # Step 3: Concatenate encoded segments
+        if ! concatenate_segments "${WORKING_DIR}/video.mkv"; then
+            error "Failed to concatenate segments"
+            cleanup_temp_files
+            return 1
+        fi
+
+        # Step 4: Process audio tracks
+        for ((i=0; i<num_audio_tracks; i++)); do
+            process_audio_track "$input_file" "$i" "${WORKING_DIR}/audio-${i}.mkv"
+        done
+
+        # Step 5: Mux everything together
+        mux_tracks "${WORKING_DIR}/video.mkv" "$output_file" "$num_audio_tracks"
+
+        # Cleanup
+        cleanup_temp_files
+    else
+        print_check "Using standard encoding process..."
+        # Process audio tracks separately for consistency
+        for ((i=0; i<num_audio_tracks; i++)); do
+            process_audio_track "$input_file" "$i" "${WORKING_DIR}/audio-${i}.mkv"
+        done
+
+        # Process video track
+        process_video_track "$input_file" "${WORKING_DIR}/video.mkv"
+
+        # Mux everything together
+        mux_tracks "${WORKING_DIR}/video.mkv" "$output_file" "$num_audio_tracks"
+
+        # Cleanup
+        cleanup_temp_files
+    fi
+
+    # Record sizes and validate output
+    local input_size
+    input_size=$(get_file_size "$input_file")
+    local output_size
+    output_size=$(get_file_size "$output_file")
+    print_encoding_summary "$filename" "$input_size" "$output_size"
+}
+
+# Process a single video track
+process_video_track() {
+    local input_file="$1"
+    local output_file="$2"
+
+    print_check "Processing video track..."
+
+    # Setup video encoding options
+    local video_opts
     video_opts=$(setup_video_options "${input_file}" "${DISABLE_CROP}")
 
-    # Format options for display
-    local video_display_opts
-    video_display_opts=$(echo "${video_opts}" | sed 's/-c:v/    -c:v/; s/ -/\\\n    -/g')
-
-    local audio_display_opts
-    audio_display_opts=$(echo "${audio_opts}" | sed 's/-map/    -map/; s/ -/\\\n    -/g')
-
-    local subtitle_display_opts
-    subtitle_display_opts=$(echo "${subtitle_opts}" | sed 's/-c:s/    -c:s/; s/ -/\\\n    -/g')
-
-    # Log the ffmpeg command with proper formatting
-    print_header "FFmpeg Command"
-    
-    cat <<-EOF | tee -a "${log_file}"
-${FFMPEG} -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \\
-    -map 0:v:0 \\
-${video_display_opts} \\
-${audio_display_opts} \\
-${subtitle_display_opts} \\
-    -stats \\
-    -y "${output_file}"
-EOF
-
-    print_header "Encoding Progress"
-    echo "[1/1] Processing: $(print_path "${filename}")"
-    echo
-
-    # Execute the actual ffmpeg command
-    "${FFMPEG}" -hide_banner -loglevel warning ${HWACCEL_OPTS} -i "${input_file}" \
+    # Execute ffmpeg command
+    if ! "${FFMPEG}" -hide_banner -loglevel warning ${HWACCEL_OPTS} \
+        -i "${input_file}" \
         -map 0:v:0 \
         ${video_opts} \
-        ${audio_opts} \
-        ${subtitle_opts} \
         -stats \
-        -y "${output_file}"
+        -y "${output_file}"; then
 
-    local encode_status=$?
+        # If hardware acceleration fails, retry with software decoding
+        if [[ -n "${HWACCEL_OPTS}" ]]; then
+            print_warning "Hardware acceleration failed, falling back to software decoding..."
+            "${FFMPEG}" -hide_banner -loglevel warning \
+                -i "${input_file}" \
+                -map 0:v:0 \
+                ${video_opts} \
+                -stats \
+                -y "${output_file}" || error "Video encoding failed"
+        else
+            error "Video encoding failed"
+        fi
+    fi
+}
 
-    # If hardware acceleration fails, retry with software decoding
-    if [ $encode_status -ne 0 ] && [ -n "${HWACCEL_OPTS}" ]; then
-        print_warning "Hardware acceleration failed, falling back to software decoding..."
+# Process a single audio track
+process_audio_track() {
+    local input_file="$1"
+    local track_index="$2"
+    local output_file="$3"
 
-        "${FFMPEG}" -hide_banner -loglevel warning -i "${input_file}" \
-            -map 0:v:0 \
-            ${video_opts} \
-            ${audio_opts} \
-            ${subtitle_opts} \
-            -stats \
-            -y "${output_file}"
+    print_check "Processing audio track ${track_index}..."
 
-        encode_status=$?
+    # Get number of channels for this track
+    local num_channels
+    num_channels=$("${FFPROBE}" -v error -select_streams "a:${track_index}" \
+        -show_entries stream=channels -of csv=p=0 "$input_file")
+    
+    print_check "Found ${num_channels} audio channels"
+
+    # Determine bitrate based on channel count
+    local bitrate
+    local layout
+    case $num_channels in
+        1)  bitrate=64; layout="mono" ;;
+        2)  bitrate=128; layout="stereo" ;;
+        6)  bitrate=256; layout="5.1" ;;
+        8)  bitrate=384; layout="7.1" ;;
+        *)  bitrate=$((num_channels * 48)); layout="custom" ;;
+    esac
+
+    print_check "Configured audio stream ${track_index}: ${num_channels} channels, ${layout} layout, ${bitrate}k bitrate"
+    print_check "Using codec: libopus (VBR mode, compression level 10)"
+
+    # Encode audio track
+    if ! "${FFMPEG}" -hide_banner -loglevel warning \
+        -i "$input_file" \
+        -map "a:${track_index}" \
+        -c:a libopus \
+        -af "aformat=channel_layouts=7.1|5.1|stereo|mono" \
+        -application audio \
+        -vbr on \
+        -compression_level 10 \
+        -frame_duration 20 \
+        -b:a "${bitrate}k" \
+        -avoid_negative_ts make_zero \
+        -y "$output_file"; then
+        error "Failed to encode audio track ${track_index}"
+    fi
+}
+
+# Mux video and audio tracks together
+mux_tracks() {
+    local video_file="$1"
+    local output_file="$2"
+    local num_audio_tracks="$3"
+
+    print_check "Muxing tracks..."
+
+    # Build ffmpeg command
+    local -a cmd=("${FFMPEG}" -hide_banner -loglevel warning)
+    
+    # Add video input
+    cmd+=(-i "$video_file")
+
+    # Add audio inputs
+    for ((i=0; i<num_audio_tracks; i++)); do
+        cmd+=(-i "${WORKING_DIR}/audio-${i}.mkv")
+    done
+
+    # Add mapping
+    cmd+=(-map "0:v:0")  # Video track
+    for ((i=1; i<=num_audio_tracks; i++)); do
+        cmd+=(-map "${i}:a:0")  # Audio tracks
+    done
+
+    # Add output file
+    cmd+=(-c copy -y "$output_file")
+
+    # Execute command
+    if ! "${cmd[@]}"; then
+        error "Failed to mux tracks"
     fi
 
-    # Validate the output
-    echo
-    print_check "Validating output file..."
-    if [ $encode_status -eq 0 ] && validate_output "${output_file}"; then
-        print_check "Output validation successful"
-        return 0
-    else
-        print_error "Encoding or validation failed for ${filename}"
-        rm -f "${output_file}"  # Remove invalid output
-        return 1
-    fi
+    print_success "Successfully muxed all tracks"
 }
 
 # Handle processing of a single input file
@@ -204,10 +308,27 @@ print_final_summary() {
     total_minutes=$(( (total_elapsed_time % 3600) / 60 ))
     total_seconds=$((total_elapsed_time % 60))
 
-    print_header "Encoding Summary"
+    print_header "Final Encoding Summary"
     
+    # Print individual file summaries
     for i in "${!encoded_files[@]}"; do
-        print_encoding_summary "$i"
+        local filename="${encoded_files[$i]}"
+        local input_size="${input_sizes[$i]}"
+        local output_size="${output_sizes[$i]}"
+        local encoding_time="${encoding_times[$i]}"
+        local encode_seconds=$((encoding_time))
+        local encode_hours=$((encode_seconds / 3600))
+        local encode_minutes=$(( (encode_seconds % 3600) / 60 ))
+        local encode_seconds=$((encode_seconds % 60))
+
+        print_separator
+        echo "File: $filename"
+        echo "Input size:  $(numfmt --to=iec-i --suffix=B "$input_size")"
+        echo "Output size: $(numfmt --to=iec-i --suffix=B "$output_size")"
+        local reduction
+        reduction=$(awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}")
+        echo "Reduction:   ${reduction}%"
+        printf "Encode time: %02dh %02dm %02ds\n" "$encode_hours" "$encode_minutes" "$encode_seconds"
     done
     
     print_separator

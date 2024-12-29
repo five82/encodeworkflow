@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Add cargo bin to PATH
+export PATH="/home/ken/.cargo/bin:${PATH}"
+
 # Add near the top of the script, after the shebang
 export LD_LIBRARY_PATH="/home/linuxbrew/.linuxbrew/lib:${LD_LIBRARY_PATH}"
 

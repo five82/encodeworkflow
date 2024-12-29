@@ -19,7 +19,8 @@ detect_dolby_vision() {
         IS_DOLBY_VISION=true
         return 0
     else
-        print_check "Standard HDR/SDR content detected"
+        print_check "Dolby Vision not detected"
+        IS_DOLBY_VISION=false
         return 1
     fi
 }
@@ -153,6 +154,31 @@ detect_crop() {
     fi
 }
 
+# Get video encoding options based on input file analysis
+get_video_encode_options() {
+    local input_file="$1"
+    local IS_DOLBY_VISION="$2"
+    local crop_filter="$3"
+    local crf="$4"
+
+    # Base video encoding options
+    local video_opts="-c:v libsvtav1 \
+        -preset ${PRESET} \
+        -crf ${crf} \
+        -svtav1-params tune=0:film-grain=0:film-grain-denoise=0"
+
+    if [[ "$IS_DOLBY_VISION" == "true" ]]; then
+        video_opts+=" -dolbyvision true"
+    fi
+
+    # Add crop filter if provided
+    if [[ -n "$crop_filter" ]]; then
+        video_opts+=" -vf $crop_filter"
+    fi
+
+    echo "$video_opts"
+}
+
 # Set up video encoding options based on input file
 setup_video_options() {
     local input_file="$1"
@@ -180,22 +206,8 @@ setup_video_options() {
     local crop_filter
     crop_filter=$(detect_crop "${input_file}" "${disable_crop}")
     
-    # Build video filter chain
-    local vf_filters="format=${PIX_FMT}"
-    if [[ -n "$crop_filter" ]]; then
-        vf_filters="${crop_filter},${vf_filters}"
-    fi
-
-    # Standard software encoding
-    video_opts="-vf ${vf_filters} \
-        -c:v libsvtav1 \
-        -preset ${PRESET} \
-        -crf ${crf} \
-        -svtav1-params ${SVT_PARAMS}"
-
-    if [[ "$IS_DOLBY_VISION" == "true" ]]; then
-        video_opts+=" -dolbyvision true"
-    fi
+    # Get video encoding options
+    video_opts=$(get_video_encode_options "${input_file}" "${IS_DOLBY_VISION}" "${crop_filter}" "${crf}")
 
     printf "%s" "${video_opts}"
 }
@@ -255,45 +267,29 @@ get_stream_sizes() {
 
 # Print a summary of the encoding process for a single file
 print_encoding_summary() {
-    local i="$1"
-    local time_seconds=${encoding_times[$i]}
-    local h=$((time_seconds / 3600))
-    local m=$(( (time_seconds % 3600) / 60 ))
-    local s=$((time_seconds % 60))
+    local filename="$1"
+    local input_size="$2"
+    local output_size="$3"
+    
+    if [[ -z "$input_size" ]] || [[ -z "$output_size" ]]; then
+        error "Missing size information for $filename"
+        return 1
+    fi
 
-    # Get raw sizes for reduction calculation
-    local input_raw=${input_sizes[$i]}
-    local output_raw=${output_sizes[$i]}
-
-    # Get stream sizes for input and output
-    local input_file="${INPUT_DIR}/${encoded_files[$i]}"
-    local output_file="${OUTPUT_DIR}/${encoded_files[$i]}"
-
-    IFS=',' read -r input_video_size input_audio_size <<< "$(get_stream_sizes "$input_file")"
-    IFS=',' read -r output_video_size output_audio_size <<< "$(get_stream_sizes "$output_file")"
-
-    # Calculate reduction using the raw byte values
+    # Calculate size reduction percentage
     local reduction
-    reduction=$(echo "scale=2; (1 - ($output_raw/$input_raw)) * 100" | bc)
+    reduction=$(awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}")
 
-    # Convert all sizes to MB for display
-    local input_mb=$(echo "scale=2; $input_raw / 1048576" | bc)
-    local output_mb=$(echo "scale=2; $output_raw / 1048576" | bc)
-    local input_video_mb=$(echo "scale=2; $input_video_size / 1048576" | bc)
-    local input_audio_mb=$(echo "scale=2; $input_audio_size / 1048576" | bc)
-    local output_video_mb=$(echo "scale=2; $output_video_size / 1048576" | bc)
-    local output_audio_mb=$(echo "scale=2; $output_audio_size / 1048576" | bc)
+    # Format sizes in human-readable format
+    local input_hr
+    local output_hr
+    input_hr=$(numfmt --to=iec-i --suffix=B "$input_size")
+    output_hr=$(numfmt --to=iec-i --suffix=B "$output_size")
 
-    echo "${encoded_files[$i]}"
-    echo "  Encode time: ${h}h ${m}m ${s}s"
-    echo "  Input size:  ${input_mb} MB"
-    echo "    - Video:   ${input_video_mb} MB"
-    echo "    - Audio:   ${input_audio_mb} MB"
-    echo "  Output size: ${output_mb} MB"
-    echo "    - Video:   ${output_video_mb} MB"
-    echo "    - Audio:   ${output_audio_mb} MB"
-    echo "  Reduced by:  ${reduction}%"
-    echo "----------------------------------------"
+    print_header "Encoding Summary"
+    echo "Input size:  $input_hr"
+    echo "Output size: $output_hr"
+    echo "Reduction:   ${reduction}%"
 }
 
 # Configure hardware acceleration options
@@ -310,4 +306,177 @@ configure_hw_accel_options() {
     esac
     
     echo "${hw_options}"
-} 
+}
+
+# Validate video segments
+validate_segments() {
+    print_check "Validating segments..."
+    local dir="$1"
+    local min_file_size=1024  # 1KB minimum file size
+
+    local segment_count
+    segment_count=$(find "$dir" -name "*.mkv" -type f | wc -l)
+    [[ $segment_count -lt 1 ]] && error "No segments found in $dir"
+
+    local invalid_segments=0
+    while IFS= read -r -d $'\0' segment; do
+        local file_size
+        file_size=$(stat -f%z "$segment" 2>/dev/null || stat -c%s "$segment")
+        
+        if [[ $file_size -lt $min_file_size ]] || ! "${FFPROBE}" -v error "$segment" >/dev/null 2>&1; then
+            print_warning "Invalid segment found: $segment"
+            ((invalid_segments++))
+        fi
+    done < <(find "$dir" -name "*.mkv" -type f -print0)
+
+    [[ $invalid_segments -gt 0 ]] && error "Found $invalid_segments invalid segments"
+    print_success "Successfully validated $segment_count segments"
+}
+
+# Segment video into chunks
+segment_video() {
+    print_check "Segmenting video..."
+    local input_file="$1"
+    local output_dir="$2"
+
+    mkdir -p "$output_dir"
+
+    "${FFMPEG}" -hide_banner -loglevel error -i "$input_file" \
+        -c:v copy \
+        -an \
+        -f segment \
+        -segment_time "$SEGMENT_LENGTH" \
+        -reset_timestamps 1 \
+        "${output_dir}/%04d.mkv"
+
+    validate_segments "$output_dir"
+}
+
+# Encode video segments using ab-av1
+encode_segments() {
+    local input_dir="$1"
+    local output_dir="$2"
+    local target_vmaf="$3"
+    local disable_crop="$4"
+    local crop_filter="$5"
+
+    # Create output directory if it doesn't exist
+    mkdir -p "$output_dir"
+
+    # Process each segment
+    local error=0
+    for segment in "$input_dir"/*.mkv; do
+        if [[ -f "$segment" ]]; then
+            local segment_name=$(basename "$segment")
+            local output_segment="${output_dir}/${segment_name}"
+            
+            # Skip if output segment already exists and has non-zero size
+            if [[ -f "$output_segment" ]] && [[ -s "$output_segment" ]]; then
+                print_check "Segment already encoded successfully: ${segment_name}"
+                continue
+            fi
+            
+            print_check "Encoding segment: ${segment_name}"
+            
+            # Only pass crop filter if it's not empty
+            local vfilter_args=""
+            if [[ -n "$crop_filter" ]]; then
+                vfilter_args="--vfilter $crop_filter"
+            fi
+            
+            # First attempt with default settings
+            if ! ab-av1 auto-encode \
+                --input "$segment" \
+                --output "$output_segment" \
+                --encoder libsvtav1 \
+                --min-vmaf "$target_vmaf" \
+                --preset "$PRESET" \
+                --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                --keyint 10s \
+                --samples "$VMAF_SAMPLE_COUNT" \
+                --sample-duration "${VMAF_SAMPLE_LENGTH}s" \
+                --vmaf "n_subsample=8:pool=harmonic_mean" \
+                $vfilter_args \
+                --quiet; then
+                
+                print_check "First attempt failed, retrying with more samples..."
+                
+                # Second attempt with more samples
+                if ! ab-av1 auto-encode \
+                    --input "$segment" \
+                    --output "$output_segment" \
+                    --encoder libsvtav1 \
+                    --min-vmaf "$target_vmaf" \
+                    --preset "$PRESET" \
+                    --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                    --keyint 10s \
+                    --samples 6 \
+                    --sample-duration "2s" \
+                    --vmaf "n_subsample=8:pool=harmonic_mean" \
+                    $vfilter_args \
+                    --quiet; then
+                    
+                    print_check "Second attempt failed, trying with slightly lower VMAF target..."
+                    
+                    # Final attempt with lower VMAF target
+                    local lower_vmaf=$((target_vmaf - 2))
+                    if ! ab-av1 auto-encode \
+                        --input "$segment" \
+                        --output "$output_segment" \
+                        --encoder libsvtav1 \
+                        --min-vmaf "$lower_vmaf" \
+                        --preset "$PRESET" \
+                        --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                        --keyint 10s \
+                        --samples 6 \
+                        --sample-duration "2s" \
+                        --vmaf "n_subsample=8:pool=harmonic_mean" \
+                        $vfilter_args \
+                        --quiet; then
+                        error "Failed to encode segment after all attempts: $segment_name"
+                        error=1
+                        break
+                    else
+                        print_check "Successfully encoded segment with VMAF target $lower_vmaf"
+                    fi
+                fi
+            fi
+        fi
+    done
+
+    return $error
+}
+
+# Concatenate encoded segments back into a single file
+concatenate_segments() {
+    local output_file="$1"
+    local concat_file="${WORKING_DIR}/concat.txt"
+
+    # Create concat file with proper format
+    > "$concat_file"
+    for segment in "${ENCODED_SEGMENTS_DIR}"/*.mkv; do
+        if [[ -f "$segment" ]]; then
+            echo "file '$(realpath "$segment")'" >> "$concat_file"
+        fi
+    done
+
+    if [[ ! -s "$concat_file" ]]; then
+        error "No segments found to concatenate"
+        return 1
+    fi
+
+    # Concatenate video segments directly to output file
+    if ! "$FFMPEG" -hide_banner -loglevel error -f concat -safe 0 -i "$concat_file" -c copy "$output_file"; then
+        error "Failed to concatenate video segments"
+        return 1
+    fi
+
+    return 0
+}
+
+# Clean up temporary files
+cleanup_temp_files() {
+    print_check "Cleaning up temporary files..."
+    rm -rf "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$WORKING_DIR"
+    mkdir -p "$WORKING_DIR"
+}
