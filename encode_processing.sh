@@ -135,6 +135,7 @@ process_video_track() {
         -i "${input_file}" \
         -map 0:v:0 \
         ${video_opts} \
+        -stats \
         -y "${output_file}"; then
 
         # If hardware acceleration fails, retry with software decoding
@@ -144,6 +145,7 @@ process_video_track() {
                 -i "${input_file}" \
                 -map 0:v:0 \
                 ${video_opts} \
+                -stats \
                 -y "${output_file}" || error "Video encoding failed"
         else
             error "Video encoding failed"
