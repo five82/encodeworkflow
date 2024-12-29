@@ -12,7 +12,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 else
     # Linux and others
-    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+    SCRIPT_DIR="$( cd "$( dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd )"
 fi
 
 # Source configuration and function files with consistent naming
