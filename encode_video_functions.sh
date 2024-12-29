@@ -341,7 +341,7 @@ segment_video() {
 
     mkdir -p "$output_dir"
 
-    "${FFMPEG}" -i "$input_file" \
+    "${FFMPEG}" -hide_banner -loglevel error -i "$input_file" \
         -c:v copy \
         -an \
         -f segment \
@@ -397,7 +397,7 @@ encode_segments() {
                 --sample-duration "${VMAF_SAMPLE_LENGTH}s" \
                 --vmaf "n_subsample=8:pool=harmonic_mean" \
                 $vfilter_args \
-                --verbose; then
+                --quiet; then
                 
                 print_check "First attempt failed, retrying with more samples..."
                 
@@ -414,7 +414,7 @@ encode_segments() {
                     --sample-duration "2s" \
                     --vmaf "n_subsample=8:pool=harmonic_mean" \
                     $vfilter_args \
-                    --verbose; then
+                    --quiet; then
                     
                     print_check "Second attempt failed, trying with slightly lower VMAF target..."
                     
@@ -432,7 +432,7 @@ encode_segments() {
                         --sample-duration "2s" \
                         --vmaf "n_subsample=8:pool=harmonic_mean" \
                         $vfilter_args \
-                        --verbose; then
+                        --quiet; then
                         error "Failed to encode segment after all attempts: $segment_name"
                         error=1
                         break
@@ -466,7 +466,7 @@ concatenate_segments() {
     fi
 
     # Concatenate video segments directly to output file
-    if ! "$FFMPEG" -f concat -safe 0 -i "$concat_file" -c copy "$output_file"; then
+    if ! "$FFMPEG" -hide_banner -loglevel error -f concat -safe 0 -i "$concat_file" -c copy "$output_file"; then
         error "Failed to concatenate video segments"
         return 1
     fi
