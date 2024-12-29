@@ -307,6 +307,12 @@ print_final_summary() {
         local filename="${encoded_files[$i]}"
         local input_size="${input_sizes[$i]}"
         local output_size="${output_sizes[$i]}"
+        local encoding_time="${encoding_times[$i]}"
+        local encode_seconds=$((encoding_time))
+        local encode_hours=$((encode_seconds / 3600))
+        local encode_minutes=$(( (encode_seconds % 3600) / 60 ))
+        local encode_seconds=$((encode_seconds % 60))
+
         print_separator
         echo "File: $filename"
         echo "Input size:  $(numfmt --to=iec-i --suffix=B "$input_size")"
@@ -314,6 +320,7 @@ print_final_summary() {
         local reduction
         reduction=$(awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}")
         echo "Reduction:   ${reduction}%"
+        printf "Encode time: %02dh %02dm %02ds\n" "$encode_hours" "$encode_minutes" "$encode_seconds"
     done
     
     print_separator
