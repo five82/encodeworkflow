@@ -82,10 +82,6 @@ class EncodingConfig(BaseModel):
         default_factory=lambda: platform.machine().lower() in ["arm64", "aarch64"],
         description="Whether running on Apple Silicon"
     )
-    is_immutable_os: bool = Field(
-        default_factory=lambda: Path("/run/media").exists(),
-        description="Whether running on immutable OS"
-    )
     jobs: int = Field(
         default_factory=lambda: os.cpu_count() or 1,
         description="Number of parallel jobs"
@@ -127,9 +123,6 @@ class EncodingConfig(BaseModel):
             **data
         )
         
-        # Detect if running on Fedora Silverblue or similar immutable OS
-        logger.debug(f"Detected immutable OS: {self.is_immutable_os}")
-        
         # Initialize paths
         self._init_paths()
         
@@ -138,27 +131,20 @@ class EncodingConfig(BaseModel):
         self.crf_hd = getattr(self, 'crf_hd', 25)
         self.crf_uhd = getattr(self, 'crf_uhd', 29)
     
-    def fix_path(self, p: Path) -> Path:
-        """Fix path for Silverblue by mapping /media to /run/media if needed."""
-        str_path = str(p.resolve())
-        if self.is_immutable_os and str_path.startswith("/media/"):
-            return Path("/run" + str_path)
-        return Path(str_path)
-
     def _init_paths(self) -> None:
         """Initialize and validate paths."""
-        # Convert paths to absolute, handling /run/media vs /media
-        if self.is_immutable_os:
-            logger.debug("Running on immutable OS, adjusting paths")
-            self.script_dir = self.fix_path(self.script_dir)
-            self.ffmpeg = self.fix_path(self.ffmpeg)
-            self.ffprobe = self.fix_path(self.ffprobe)
-            if self.working_dir:
-                self.working_dir = self.fix_path(self.working_dir)
-                self.segments_dir = self.fix_path(self.segments_dir)
-                self.encoded_segments_dir = self.fix_path(self.encoded_segments_dir)
-            if self.temp_dir:
-                self.temp_dir = self.fix_path(self.temp_dir)
+        # Convert paths to absolute
+        self.script_dir = self.script_dir.resolve()
+        self.ffmpeg = self.ffmpeg.resolve()
+        self.ffprobe = self.ffprobe.resolve()
+        if self.working_dir:
+            self.working_dir = self.working_dir.resolve()
+        if self.temp_dir:
+            self.temp_dir = self.temp_dir.resolve()
+        if self.segments_dir:
+            self.segments_dir = self.segments_dir.resolve()
+        if self.encoded_segments_dir:
+            self.encoded_segments_dir = self.encoded_segments_dir.resolve()
             
         # Validate required paths exist
         for name, path in [

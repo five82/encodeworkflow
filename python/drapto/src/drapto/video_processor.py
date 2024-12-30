@@ -60,31 +60,13 @@ class VideoProcessor:
         signal.signal(signum, signal.SIG_DFL)
         os.kill(os.getpid(), signum)
 
-    def _cleanup_work_dirs(self):
+    def _cleanup_work_dirs(self) -> None:
         """Clean up all active work directories."""
-        for work_dir in self._active_work_dirs.copy():
-            if work_dir.exists():
-                logger.info(f"Cleaning up {work_dir}...")
-                try:
-                    shutil.rmtree(work_dir)
-                    self._active_work_dirs.remove(work_dir)
-                    logger.info("Cleanup completed")
-                except Exception as e:
-                    logger.error(f"Failed to clean up {work_dir} using shutil.rmtree: {e}")
-                    # Try to clean up with rm command as fallback
-                    try:
-                        subprocess.run(['rm', '-rf', str(work_dir)], check=True)
-                        self._active_work_dirs.remove(work_dir)
-                        logger.info("Cleanup completed using rm command")
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"Failed to clean up {work_dir} using rm command: {e}")
-                    
-    def fix_path(self, p: Path) -> Path:
-        """Fix path for Silverblue by mapping /media to /run/media if needed."""
-        str_path = str(p.resolve())
-        if Path("/run/media").exists() and str_path.startswith("/media/"):
-            return Path("/run" + str_path)
-        return Path(str_path)
+        for work_dir in self._active_work_dirs:
+            try:
+                shutil.rmtree(work_dir)
+            except Exception as e:
+                logger.error(f"Failed to clean up work directory {work_dir}: {e}")
 
     def process_video(self, input_file: Path, output_file: Path) -> None:
         """Process a video file.
@@ -93,9 +75,9 @@ class VideoProcessor:
             input_file: Input video file
             output_file: Output video file
         """
-        # Fix paths for Silverblue
-        input_abs = self.fix_path(input_file)
-        output_abs = self.fix_path(output_file)
+        # Convert paths to absolute
+        input_abs = input_file.resolve()
+        output_abs = output_file.resolve()
         
         logger.debug(f"Processing video: input={input_abs}, output={output_abs}")
         

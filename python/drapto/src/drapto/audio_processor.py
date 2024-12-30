@@ -25,14 +25,7 @@ class AudioProcessor:
             List of audio stream info dictionaries
         """
         try:
-            # Handle Silverblue path mapping
-            def fix_path(p: Path) -> Path:
-                str_path = str(p.resolve())
-                if Path("/run/media").exists() and str_path.startswith("/media/"):
-                    return Path("/run" + str_path)
-                return Path(str_path)
-            
-            input_abs = fix_path(input_file)
+            input_abs = input_file.resolve()
             logger.info(f"Getting audio streams from: {input_abs}")
             
             # Get detailed stream info
@@ -197,21 +190,17 @@ class AudioProcessor:
             True if successful, False otherwise
         """
         try:
+            input_abs = input_file.resolve()
+            output_abs = output_file.resolve()
+            
             # Get audio streams
-            streams = self.get_audio_streams(input_file)
+            streams = self.get_audio_streams(input_abs)
             if not streams:
                 logger.warning("No audio streams found")
                 return False
 
             # Create output directory if needed
             output_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Handle Silverblue path mapping
-            def fix_path(p: Path) -> Path:
-                str_path = str(p.resolve())
-                if Path("/run/media").exists() and str_path.startswith("/media/"):
-                    return Path("/run" + str_path)
-                return Path(str_path)
 
             # Process each audio track separately
             encoded_tracks = []
@@ -225,8 +214,7 @@ class AudioProcessor:
                 
                 # Encode audio track
                 track_output = output_file.parent / f"audio-{i}.mkv"
-                input_abs = fix_path(input_file)
-                track_abs = fix_path(track_output)
+                track_abs = track_output.resolve()
                 
                 cmd = [
                     'ffmpeg', '-hide_banner', '-loglevel', 'info',
@@ -264,10 +252,6 @@ class AudioProcessor:
                 encoded_tracks.append(track_abs)
             
             # Mux all audio tracks together
-            input_abs = fix_path(input_file)
-            output_abs = fix_path(output_file)
-            
-            # Build muxing command
             mux_cmd = [
                 'ffmpeg', '-hide_banner', '-loglevel', 'info'
             ]
