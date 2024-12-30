@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "drapto"
+version = "0.1.0"
+description = "Video encoding workflow automation using ab-av1"
+requires-python = ">=3.8"
+dependencies = [
+    "loguru>=0.7.2",
+    "pydantic>=2.5.2"
+]
+
+[project.scripts]
+drapto = "drapto.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/drapto"]
