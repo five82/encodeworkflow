@@ -10,13 +10,6 @@ from pathlib import Path
 # System paths
 SCRIPT_DIR = Path(__file__).parent.parent.parent
 
-# Default settings
-TARGET_VMAF = 93
-PRESET = 6
-SEGMENT_LENGTH = 15
-VMAF_SAMPLE_LENGTH = 1
-VMAF_SAMPLE_COUNT = 3
-
 # Try to find ffmpeg/ffprobe in $HOME/ffmpeg first, fallback to system
 HOME_FFMPEG_DIR = Path.home() / "ffmpeg"
 if HOME_FFMPEG_DIR.exists():
@@ -33,7 +26,14 @@ else:
 SEGMENTS_DIR = Path(os.getenv("SEGMENTS_DIR", tempfile.gettempdir())) / "segments"
 ENCODED_SEGMENTS_DIR = Path(os.getenv("ENCODED_SEGMENTS_DIR", tempfile.gettempdir())) / "encoded"
 
-# Video encoding settings
+# ab-av1 encoding settings
+TARGET_VMAF = 93
+PRESET = 6
+SEGMENT_LENGTH = 15
+VMAF_SAMPLE_LENGTH = 1
+VMAF_SAMPLE_COUNT = 3
+
+# ffmpeg SVT-AV1 video encoding settings
 PRESET = 6
 CRF_SD = 25     # For videos with width <= 1280 (720p)
 CRF_HD = 25     # For videos with width <= 1920 (1080p)

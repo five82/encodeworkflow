@@ -2,34 +2,46 @@
 
 import argparse
 import sys
+import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
+import shutil
 
 from loguru import logger
 
 from . import default_config as defaults
 from .config import EncodingConfig
 from .video_processor import VideoProcessor
+from .path_manager import PathManager
+from .formatting import TerminalFormatter
 
 
-def parse_path(path: str) -> Path:
+def parse_path(path: str) -> Tuple[Path, str]:
     """Parse path string to Path object.
     
     Args:
         path: Path string
         
     Returns:
-        Path object
+        Tuple of (Path object, original path string)
         
     Raises:
         argparse.ArgumentTypeError: If path is invalid
     """
     try:
-        p = Path(path).resolve()
+        # Get base directory for videos
+        base_dir = Path("/home/ken/projects/encodeworkflow/videos")
+        
+        # First get absolute path relative to base directory
+        p = base_dir / path
+        
         # Handle Silverblue path mapping
         if Path("/run/media").exists() and str(p).startswith("/media/"):
             p = Path("/run" + str(p))
-        return p
+            
+        # Don't resolve output paths since they may not exist yet
+        # and we want to preserve trailing slashes
+        return p, path
     except Exception as e:
         raise argparse.ArgumentTypeError(f"Invalid path: {e}")
 
@@ -166,7 +178,7 @@ def main() -> int:
     encode_parser.add_argument(
         "--vmaf-sample-count",
         type=int,
-        default=30,
+        default=defaults.VMAF_SAMPLE_COUNT,
         help="Number of VMAF samples"
     )
     encode_parser.add_argument(
@@ -205,16 +217,36 @@ def main() -> int:
     try:
         # Configure logging
         log_config = {
-            "handlers": [{"sink": sys.stderr, "level": args.log_level}]
+            "handlers": [{
+                "sink": sys.stderr,
+                "level": args.log_level,
+                "format": "<level>{message}</level>",
+                "colorize": True
+            }]
         }
         if args.log_file:
-            log_config["handlers"].append({"sink": args.log_file, "level": args.log_level})
+            log_config["handlers"].append({
+                "sink": args.log_file[0],
+                "level": args.log_level,
+                "format": "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+            })
         logger.configure(**log_config)
         
         if args.command == "encode":
-            # Convert paths to absolute
-            input_path = args.input.resolve()
-            output_path = args.output.resolve()
+            # Print tool paths
+            fmt = TerminalFormatter()
+            fmt.print_header("Tool Paths")
+            print(f"{fmt.bold}FFmpeg:   {fmt.reset}{defaults.FFMPEG}")
+            print(f"{fmt.bold}FFprobe:  {fmt.reset}{defaults.FFPROBE}")
+            print(f"{fmt.bold}ab-av1:   {fmt.reset}{shutil.which('ab-av1') or 'Not found'}")
+            print()
+            
+            # Create path manager
+            try:
+                paths = PathManager(args.input[0], args.output[0], args.output[1])
+            except Exception as e:
+                logger.error(f"Path error: {e}")
+                return 1
             
             # Create configuration
             config = EncodingConfig(
@@ -231,21 +263,37 @@ def main() -> int:
             
             # Process video
             processor = VideoProcessor(config)
-            if input_path.is_dir():
-                # Create output directory if it doesn't exist
-                output_path.mkdir(parents=True, exist_ok=True)
-                if not output_path.is_dir():
-                    raise ValueError("Output must be a directory when input is a directory")
-                processor.process_directory(input_path, output_path)
+            if args.input[0].is_dir():
+                # Check if input directory has video files
+                video_extensions = {'.mp4', '.mkv', '.mov', '.avi', '.wmv'}
+                has_videos = any(f.suffix.lower() in video_extensions for f in args.input[0].rglob('*'))
+                if not has_videos:
+                    raise ValueError(f"No video files found in input directory: {args.input[0]}")
+                    
+                processor.process_directory(args.input[0], paths.output_dir)
             else:
-                # Create parent directories for output file if needed
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                if output_path.is_dir():
-                    raise ValueError("Output must be a file when input is a file")
-                processor.process_video(input_path, output_path)
+                # Validate input is a video file
+                video_extensions = {'.mp4', '.mkv', '.mov', '.avi', '.wmv'}
+                if args.input[0].suffix.lower() not in video_extensions:
+                    raise ValueError(f"Input file is not a recognized video format: {args.input[0]}")
+                    
+                # Check if output directory is writable
+                if not os.access(paths.output_dir, os.W_OK):
+                    raise PermissionError(f"Output directory is not writable: {paths.output_dir}")
+                    
+                processor.process_video(args.input[0], paths.output_file)
         
         return 0
         
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
+        return 1
+    except PermissionError as e:
+        logger.error(f"Permission error: {e}")
+        return 1
+    except ValueError as e:
+        logger.error(f"Invalid input: {e}")
+        return 1
     except Exception as e:
         logger.error(f"Error: {e}")
         if args.log_level == "DEBUG":

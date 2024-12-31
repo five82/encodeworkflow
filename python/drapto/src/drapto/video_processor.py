@@ -10,6 +10,8 @@ import signal
 import atexit
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Set
+import time
+import json
 
 from loguru import logger
 
@@ -17,6 +19,7 @@ from .encoder import VideoEncoder
 from .segment_handler import SegmentHandler
 from .formatting import TerminalFormatter
 from .audio_processor import AudioProcessor
+from .work_manager import WorkDirectoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,41 +36,16 @@ class VideoProcessor:
         self.encoder = VideoEncoder(config)
         self.segment_handler = SegmentHandler(config)
         self.fmt = TerminalFormatter()
-        self.audio_processor = AudioProcessor()
+        self.audio_processor = AudioProcessor(self.fmt)
         self.stream_sizes: Dict[str, int] = {}
-        self._active_work_dirs: Set[Path] = set()
+        self.work_manager = WorkDirectoryManager(config)
         
-        # Register cleanup handlers
-        atexit.register(self._cleanup_work_dirs)
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        # Validate configuration
+        if config.vmaf_sample_count < 1:
+            raise ValueError("VMAF sample count must be at least 1")
+        if config.vmaf_sample_length < 1:
+            raise ValueError("VMAF sample length must be at least 1 second")
         
-        # Set up process group to handle child processes
-        os.setpgrp()
-
-    def _signal_handler(self, signum, frame):
-        """Handle interruption signals by cleaning up work directories."""
-        logger.info(f"Received signal {signum}, cleaning up...")
-        try:
-            # Try to terminate any child processes in our process group
-            if signum in (signal.SIGINT, signal.SIGTERM):
-                os.killpg(os.getpgid(0), signum)
-        except Exception as e:
-            logger.error(f"Error terminating child processes: {e}")
-            
-        self._cleanup_work_dirs()
-        # Re-raise the signal
-        signal.signal(signum, signal.SIG_DFL)
-        os.kill(os.getpid(), signum)
-
-    def _cleanup_work_dirs(self) -> None:
-        """Clean up all active work directories."""
-        for work_dir in self._active_work_dirs:
-            try:
-                shutil.rmtree(work_dir)
-            except Exception as e:
-                logger.error(f"Failed to clean up work directory {work_dir}: {e}")
-
     def process_video(self, input_file: Path, output_file: Path) -> None:
         """Process a video file.
         
@@ -75,47 +53,39 @@ class VideoProcessor:
             input_file: Input video file
             output_file: Output video file
         """
-        # Convert paths to absolute
-        input_abs = input_file.resolve()
-        output_abs = output_file.resolve()
+        start_time = time.time()
         
-        logger.debug(f"Processing video: input={input_abs}, output={output_abs}")
-        
-        logger.info(f"Processing video: {input_abs}")
+        # Print starting info
+        self.fmt.print_encode_start(str(input_file), str(output_file))
         
         # Detect Dolby Vision
-        is_dolby_vision = self.detect_dolby_vision(input_abs)
+        is_dolby_vision = self.detect_dolby_vision(input_file)
+        self.fmt.print_dolby_check(is_dolby_vision)
         
         if is_dolby_vision:
-            logger.info("Using FFmpeg directly for Dolby Vision content")
-            self.encode_dolby_vision(input_abs, output_abs)
-        else:
-            # Use configured working_dir if set, otherwise create in output dir
-            if self.config.working_dir:
-                work_dir = Path(self.config.working_dir) / f"{output_abs.stem}_work"
-            else:
-                work_dir = output_abs.parent / f"{output_abs.stem}_work"
+            # Use FFmpeg directly for Dolby Vision content
+            logger.info("Encoding Dolby Vision content using FFmpeg and libsvtav1")
+            self.encode_dolby_vision(input_file, output_file)
+            return
             
-            # Ensure work directory is empty before starting
-            if work_dir.exists():
-                logger.info(f"Cleaning up existing work directory {work_dir}...")
-                try:
-                    shutil.rmtree(work_dir)
-                except Exception as e:
-                    logger.error(f"Failed to clean up existing work directory: {e}")
-                    
-            work_dir.mkdir(parents=True, exist_ok=True)
-            self._active_work_dirs.add(work_dir)
-            
+        # For non-Dolby Vision content, proceed with chunked encoding
+        with self.work_manager.work_space(output_file) as work_dirs:
             try:
-                # Set up directories
-                segments_dir = work_dir / "segments"
-                encoded_segments_dir = work_dir / "encoded"
-                audio_file = work_dir / "audio.opus"
-                video_file = work_dir / "video.mkv"
+                # Set up file paths
+                audio_file = work_dirs['audio'] / "audio.opus"
+                video_file = work_dirs['root'] / "video.mkv"
                 
                 # Encode audio first
-                if not self.audio_processor.encode_audio(input_abs, audio_file):
+                audio_info = self.audio_processor.get_audio_info(input_file)
+                if audio_info:
+                    self.fmt.print_audio_status(
+                        0,  # track number
+                        audio_info['channels'],
+                        audio_info['layout'],
+                        audio_info['bitrate']
+                    )
+                
+                if not self.audio_processor.encode_audio(input_file, audio_file, work_dirs['audio']):
                     logger.error("Failed to encode audio")
                     raise RuntimeError("Audio encoding failed")
                 
@@ -125,43 +95,103 @@ class VideoProcessor:
                     raise RuntimeError("Audio validation failed")
 
                 # Get crop filter
-                crop_filter = self.detect_crop(input_abs) if not self.config.disable_crop else None
+                if not self.config.disable_crop:
+                    self.fmt.print_black_bar_analysis(24)  # Standard frame count
+                    crop_filter = self.detect_crop(input_file)
+                    if crop_filter:
+                        crop_pixels = int(crop_filter.split('=')[1].split(':')[1])
+                        self.fmt.print_black_bar_analysis(24, crop_pixels)
+                else:
+                    crop_filter = None
                 
                 # Segment video
-                self.segment_handler.segment_video(input_abs, segments_dir)
+                self.fmt.print_check("Cleaning up temporary files...")
+                self.segment_handler.segment_video(input_file, work_dirs['segments'])
+                
+                # Count segments
+                segment_count = len(list(work_dirs['segments'].glob('*.mkv')))
+                self.fmt.print_segment_status(segment_count)
                 
                 # Encode segments
-                self._encode_segments(segments_dir, encoded_segments_dir, crop_filter)
+                self._encode_segments(work_dirs['segments'], work_dirs['encoded'], crop_filter)
                 
                 # Validate encoded segments
-                self.segment_handler.validate_segments(encoded_segments_dir)
+                self.segment_handler.validate_segments(work_dirs['encoded'])
                 
                 # Concatenate video segments
-                self.segment_handler.concatenate_segments(encoded_segments_dir, video_file)
+                self.segment_handler.concatenate_segments(work_dirs['encoded'], video_file)
                 
                 # Mux final output
-                self._mux_final_output(video_file, audio_file, input_abs, output_abs)
+                logger.info("Muxing tracks...")
+                mux_cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel", "info",
+                    "-i", str(video_file),
+                    "-i", str(audio_file),
+                    "-i", str(input_file),  # Original file for subtitles/attachments
+                    "-map", "0:v:0",  # Video from encoded file
+                    "-map", "1:a?",   # Audio from encoded file
+                    "-map", "2:s?",   # Subtitles from original
+                    "-map", "2:t?",   # Attachments from original
+                    "-c:v", "copy",
+                    "-c:a", "copy",
+                    "-c:s", "copy",
+                    "-c:t", "copy",
+                    str(output_file)
+                ]
+                logger.info("\nFFmpeg command for muxing tracks:")
+                logger.info("\n" + self._format_ffmpeg_command(mux_cmd))
+                subprocess.run(mux_cmd, check=True)
+                self.fmt.print_check("Successfully muxed all tracks")
+                self.fmt.print_check("Cleaning up temporary files...")
+                
+                # Print encoding summary
+                encode_time = time.time() - start_time
+                hours = int(encode_time // 3600)
+                minutes = int((encode_time % 3600) // 60)
+                seconds = int(encode_time % 60)
+                time_str = f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
+                
+                input_size = input_file.stat().st_size
+                output_size = output_file.stat().st_size
+                
+                self.fmt.print_encode_summary(
+                    input_size,
+                    output_size,
+                    time_str,
+                    input_file.name
+                )
                 
             except Exception as e:
                 logger.error(f"Error processing video: {e}")
                 raise
-            finally:
-                # Remove this work directory from active set and clean it up
-                self._active_work_dirs.discard(work_dir)
-                if work_dir.exists():
-                    logger.info(f"Cleaning up {work_dir}...")
-                    try:
-                        shutil.rmtree(work_dir)
-                        logger.info("Cleanup completed")
-                    except Exception as e:
-                        logger.error(f"Failed to clean up work directory: {e}")
-                        # Try to clean up with a shell command as fallback
-                        try:
-                            subprocess.run(['rm', '-rf', str(work_dir)], check=True)
-                            logger.info("Cleanup completed using rm command")
-                        except subprocess.CalledProcessError as e:
-                            logger.error(f"Failed to clean up work directory using rm command: {e}")
-                    
+
+    def _encode_segments(self, segments_dir: Path, encoded_dir: Path, crop_filter: Optional[str] = None) -> None:
+        """Encode video segments.
+        
+        Args:
+            segments_dir: Directory containing input segments
+            encoded_dir: Directory for encoded segments
+            crop_filter: Optional crop filter string
+        """
+        encoded_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get list of segments
+        segments = sorted(segments_dir.glob('*.mkv'))
+        total_segments = len(segments)
+        
+        for i, segment in enumerate(segments, 1):
+            output_segment = encoded_dir / segment.name
+            
+            # Encode the segment
+            self.encoder.encode_segment(segment, output_segment, crop_filter)
+            
+            # Update progress
+            encoded_size = sum(f.stat().st_size for f in encoded_dir.glob('*.mkv'))
+            progress = (i / total_segments) * 100
+            self.fmt.print_encode_progress(progress, self.fmt.format_size(encoded_size))
+            
     def process_directory(self, input_dir: Path, output_dir: Path) -> bool:
         """Process all video files in a directory.
         
@@ -189,25 +219,44 @@ class VideoProcessor:
             return False
             
         self.fmt.print_check(f"Found {len(video_files)} video files")
-        success_count = 0
+        
+        # Track file stats for final summary
+        file_stats = []
+        start_time = time.time()
         
         # Process each video
         for video_file in video_files:
+            file_start_time = time.time()
             rel_path = video_file.relative_to(input_dir)
             output_file = output_dir / rel_path.with_suffix('.mkv')
             output_file.parent.mkdir(parents=True, exist_ok=True)
             
-            self.fmt.print_check(f"\nProcessing {rel_path}")
-            self.process_video(video_file, output_file)
-            success_count += 1
+            try:
+                self.process_video(video_file, output_file)
                 
-        # Print summary
-        if success_count == len(video_files):
-            self.fmt.print_success(f"\nSuccessfully processed all {success_count} videos")
-            return True
-        else:
-            self.fmt.print_error(f"\nProcessed {success_count} out of {len(video_files)} videos")
-            return False
+                # Calculate encode time
+                encode_time = time.time() - file_start_time
+                hours = int(encode_time // 3600)
+                minutes = int((encode_time % 3600) // 60)
+                seconds = int(encode_time % 60)
+                time_str = f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
+                
+                # Add stats to list
+                file_stats.append((
+                    video_file.name,
+                    video_file.stat().st_size,
+                    output_file.stat().st_size,
+                    time_str
+                ))
+                
+            except Exception as e:
+                logger.error(f"Failed to process {video_file}: {e}")
+                return False
+                
+        # Print final summary
+        self.fmt.print_final_summary(file_stats)
+        
+        return True
 
     def detect_crop(self, input_file: Path) -> Optional[str]:
         """Detect black bars and return crop filter.
@@ -221,14 +270,14 @@ class VideoProcessor:
         try:
             logger.info("Analyzing video for black bars...")
             
-            # Check if input is HDR and get color properties
+            # Get original dimensions
             result = subprocess.run(
                 [
                     'ffprobe',
                     '-v', 'error',
                     '-select_streams', 'v:0',
-                    '-show_entries', 'stream=color_transfer,color_primaries,color_space',
-                    '-of', 'csv=p=0',
+                    '-show_entries', 'stream=width,height',
+                    '-of', 'json',
                     str(input_file)
                 ],
                 capture_output=True,
@@ -236,11 +285,33 @@ class VideoProcessor:
                 check=True
             )
             
-            color_props = result.stdout.strip().split(',')
-            if len(color_props) != 3:
+            data = json.loads(result.stdout)
+            if not data.get('streams'):
                 return None
                 
-            color_transfer, color_primaries, color_space = color_props
+            original_width = data['streams'][0].get('width')
+            original_height = data['streams'][0].get('height')
+            if not original_width or not original_height:
+                return None
+            
+            # Check if input is HDR and get color properties
+            result = subprocess.run(
+                [
+                    'ffprobe',
+                    '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=color_transfer,color_primaries,color_space',
+                    '-of', 'json',
+                    str(input_file)
+                ],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            # Parse JSON output
+            data = json.loads(result.stdout)
+            stream = data.get('streams', [{}])[0]
             
             # Set initial crop threshold
             crop_threshold = 16
@@ -254,9 +325,9 @@ class VideoProcessor:
             ]
             
             if (
-                color_transfer in hdr_formats or
-                color_primaries in hdr_formats or
-                color_space in hdr_formats
+                stream.get('color_transfer') in hdr_formats or
+                stream.get('color_primaries') in hdr_formats or
+                stream.get('color_space') in hdr_formats
             ):
                 is_hdr = True
                 crop_threshold = 24
@@ -281,7 +352,8 @@ class VideoProcessor:
             for line in result.stderr.split('\n'):
                 if 'crop=' in line:
                     crop = line.split('crop=')[1].split(' ')[0]
-                    if crop not in crop_values:
+                    # Only consider crops that maintain original width
+                    if crop.startswith(f'crop={original_width}:'):
                         crop_values.append(crop)
                         
             if not crop_values:
@@ -296,6 +368,12 @@ class VideoProcessor:
         except subprocess.CalledProcessError as e:
             logger.error(f"Error detecting crop: {e}")
             return None
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing ffprobe output: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error in crop detection: {e}")
+            return None
 
     def detect_dolby_vision(self, input_file: Path) -> bool:
         """Detect if file contains Dolby Vision.
@@ -307,23 +385,35 @@ class VideoProcessor:
             True if Dolby Vision is detected
         """
         try:
-            result = subprocess.run(
-                ['mediainfo', str(input_file)],
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            # Run ffprobe to get stream info
+            cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_streams',
+                '-select_streams', 'v',
+                str(input_file)
+            ]
             
-            if 'Dolby Vision' in result.stdout:
-                logger.info("Dolby Vision detected")
-                return True
-                
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            probe_data = json.loads(result.stdout)
+            
+            # Check for Dolby Vision metadata
+            for stream in probe_data.get('streams', []):
+                if stream.get('codec_type') == 'video':
+                    side_data = stream.get('side_data_list', [])
+                    for data in side_data:
+                        if data.get('side_data_type') == 'DOVI configuration record':
+                            logger.info("Dolby Vision detected")
+                            return True
+                            
+            logger.info("Dolby Vision not detected")
             return False
             
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             logger.error(f"Error detecting Dolby Vision: {e}")
             return False
-            
+
     def _configure_hw_accel(self) -> List[str]:
         """Configure hardware acceleration options.
         
@@ -432,7 +522,7 @@ class VideoProcessor:
         try:
             # Write bash wrapper function
             bash_script.write("""#!/bin/bash
-set -e
+set -euo pipefail
 
 # Helper functions
 print_check() { echo "✓ $*" >&2; }
@@ -444,6 +534,12 @@ encode_single_segment() {
     local target_vmaf="$3"
     local crop_filter="$4"
     
+    # Skip if already encoded
+    if [[ -f "$output_segment" ]] && [[ -s "$output_segment" ]]; then
+        print_check "Segment already encoded: $(basename "$segment")"
+        return 0
+    fi
+    
     # Build base command
     local cmd=(
         ab-av1 auto-encode
@@ -451,10 +547,10 @@ encode_single_segment() {
         --output "$output_segment"
         --encoder libsvtav1
         --min-vmaf "$target_vmaf"
-        --preset "$PRESET"
+        --preset "${PRESET}"
         --svt "tune=0:film-grain=0:film-grain-denoise=0"
         --keyint 10s
-        --samples "$VMAF_SAMPLE_COUNT"
+        --samples "${VMAF_SAMPLE_COUNT}"
         --sample-duration "${VMAF_SAMPLE_LENGTH}s"
         --vmaf "n_subsample=8:pool=harmonic_mean"
         --quiet
@@ -465,8 +561,12 @@ encode_single_segment() {
         cmd+=(--vfilter "crop=$crop_filter")
     fi
     
+    # Print command
+    echo "Running command: ${cmd[*]}" >&2
+    
     # First attempt with default settings
     if "${cmd[@]}"; then
+        print_check "Successfully encoded segment: $(basename "$segment")"
         return 0
     fi
     
@@ -477,11 +577,11 @@ encode_single_segment() {
         --output "$output_segment"
         --encoder libsvtav1
         --min-vmaf "$target_vmaf"
-        --preset "$PRESET"
+        --preset "${PRESET}"
         --svt "tune=0:film-grain=0:film-grain-denoise=0"
         --keyint 10s
-        --samples 6
-        --sample-duration "2s"
+        --samples "${VMAF_SAMPLE_COUNT}"
+        --sample-duration "${VMAF_SAMPLE_LENGTH}s"
         --vmaf "n_subsample=8:pool=harmonic_mean"
         --quiet
     )
@@ -490,7 +590,10 @@ encode_single_segment() {
         cmd+=(--vfilter "crop=$crop_filter")
     fi
     
+    echo "Retrying with more samples: ${cmd[*]}" >&2
+    
     if "${cmd[@]}"; then
+        print_check "Successfully encoded segment with more samples: $(basename "$segment")"
         return 0
     fi
     
@@ -502,11 +605,11 @@ encode_single_segment() {
         --output "$output_segment"
         --encoder libsvtav1
         --min-vmaf "$lower_vmaf"
-        --preset "$PRESET"
+        --preset "${PRESET}"
         --svt "tune=0:film-grain=0:film-grain-denoise=0"
         --keyint 10s
-        --samples 6
-        --sample-duration "2s"
+        --samples "${VMAF_SAMPLE_COUNT}"
+        --sample-duration "${VMAF_SAMPLE_LENGTH}s"
         --vmaf "n_subsample=8:pool=harmonic_mean"
         --quiet
     )
@@ -515,7 +618,10 @@ encode_single_segment() {
         cmd+=(--vfilter "crop=$crop_filter")
     fi
     
+    echo "Final attempt with lower VMAF target: ${cmd[*]}" >&2
+    
     if "${cmd[@]}"; then
+        print_check "Successfully encoded segment with lower VMAF: $(basename "$segment")"
         return 0
     fi
     
@@ -528,7 +634,7 @@ encode_single_segment() {
             
             # Build command list
             segment_count = 0
-            for segment in segments_dir.glob("*.mkv"):
+            for segment in sorted(segments_dir.glob("*.mkv")):
                 output_segment = encoded_dir / segment.name
                 
                 # Skip if already encoded
@@ -540,18 +646,18 @@ encode_single_segment() {
                 cmd = f"source {bash_script.name} && encode_single_segment '{segment}' '{output_segment}' '{self.config.target_vmaf}' '{crop_filter or ''}'"
                 cmd_file.write(cmd + "\n")
                 segment_count += 1
-                
+            
             cmd_file.close()
             
             if segment_count == 0:
                 logger.error("No segments found to encode")
                 return
-                
+            
             # Find parallel executable
             parallel_path = shutil.which("parallel")
             if not parallel_path:
                 raise RuntimeError("GNU Parallel not found in PATH")
-                
+            
             # Set up environment variables
             env = os.environ.copy()
             env.update({
@@ -568,22 +674,41 @@ encode_single_segment() {
                     "--no-notice",
                     "--line-buffer",
                     "--halt", "soon,fail=1",
-                    "--jobs", "0",
+                    "--jobs", str(os.cpu_count() or 1),
                     "--will-cite",
                     "--bar",
                     "--eta",
-                    "::::","{}".format(cmd_file.name)
+                    "--progress",
+                    "--joblog", str(encoded_dir / "parallel.log"),
+                    "--env", "PRESET",
+                    "--env", "VMAF_SAMPLE_COUNT",
+                    "--env", "VMAF_SAMPLE_LENGTH",
+                    "--",
+                    "bash", "-c"
                 ]
                 
                 # First try to run one command directly to check for issues
                 with open(cmd_file.name, 'r') as f:
                     test_cmd = f.readline().strip()
-                    logger.debug(f"Testing first command: {test_cmd}")
-                    subprocess.run(["bash", "-c", test_cmd], check=True, env=env)
+                    logger.info("Testing encoding parameters with first segment...")
+                    try:
+                        subprocess.run(["bash", "-c", test_cmd], check=True, env=env)
+                        logger.info("Test encode successful, proceeding with parallel encoding")
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Test encode failed: {e}")
+                        raise
                 
                 # Run parallel encoding
-                subprocess.run(parallel_cmd, check=True, env=env)
-                
+                with open(cmd_file.name, 'r') as f:
+                    try:
+                        subprocess.run(parallel_cmd, stdin=f, check=True, env=env)
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Parallel encoding failed: {e}")
+                        # If parallel fails, try sequential encoding
+                        logger.warning("Falling back to sequential encoding")
+                        f.seek(0)  # Reset file pointer
+                        for cmd in f:
+                            subprocess.run(["bash", "-c", cmd.strip()], check=True, env=env)
             except subprocess.CalledProcessError as e:
                 # If parallel fails, try sequential encoding
                 logger.warning(f"Parallel encoding failed ({e}), falling back to sequential encoding")
@@ -608,6 +733,34 @@ encode_single_segment() {
         
         logger.info("Successfully encoded segments")
 
+    def _format_ffmpeg_command(self, cmd: list[str]) -> str:
+        """Format FFmpeg command for readable output.
+        
+        Args:
+            cmd: FFmpeg command as list of arguments
+            
+        Returns:
+            Formatted command string
+        """
+        # Group related arguments together
+        formatted_parts = []
+        i = 0
+        while i < len(cmd):
+            if cmd[i].startswith('-'):
+                # Collect all values for this flag
+                values = []
+                i += 1
+                while i < len(cmd) and not cmd[i].startswith('-'):
+                    values.append(cmd[i])
+                    i += 1
+                formatted_parts.append(f"{cmd[i-len(values)-1]} {' '.join(values)}")
+            else:
+                formatted_parts.append(cmd[i])
+                i += 1
+        
+        # Join with newlines and indent
+        return "    " + "\n    ".join(formatted_parts)
+
     def encode_dolby_vision(self, input_file: Path, output_file: Path) -> None:
         """Encode Dolby Vision content using FFmpeg and libsvtav1.
         
@@ -615,114 +768,113 @@ encode_single_segment() {
             input_file: Input video file
             output_file: Output video file
         """
-        # Create working directory
-        work_dir = output_file.parent / f"{output_file.stem}_work"
-        
-        # Clean up existing work directory if it exists
-        if work_dir.exists():
-            logger.info(f"Cleaning up existing work directory {work_dir}...")
+        with self.work_manager.work_space(output_file) as work_dirs:
             try:
-                shutil.rmtree(work_dir)
-            except Exception as e:
-                logger.error(f"Failed to clean up existing work directory: {e}")
-                try:
-                    subprocess.run(['rm', '-rf', str(work_dir)], check=True)
-                    logger.info("Cleanup completed using rm command")
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"Failed to clean up work directory using rm command: {e}")
-                    raise RuntimeError("Failed to clean up existing work directory")
-        
-        work_dir.mkdir(parents=True, exist_ok=True)
-        self._active_work_dirs.add(work_dir)
-        
-        try:
-            # Set up audio file
-            audio_file = work_dir / "audio.opus"
-            
-            # Encode audio first
-            if not self.audio_processor.encode_audio(input_file, audio_file):
-                logger.error("Failed to encode audio")
-                raise RuntimeError("Audio encoding failed")
-            
-            # Validate audio
-            if not self.audio_processor.validate_audio(audio_file):
-                logger.error("Audio validation failed")
-                raise RuntimeError("Audio validation failed")
-
-            # Get video width for CRF selection
-            width = self.get_video_width(input_file)
-            
-            # Set CRF based on resolution
-            if width > 1920:
-                crf = self.config.crf_uhd
-                logger.info(f"UHD quality detected ({width}px width), using CRF {crf}")
-            elif width > 1280:
-                crf = self.config.crf_hd
-                logger.info(f"HD quality detected ({width}px width), using CRF {crf}")
-            else:
-                crf = self.config.crf_sd
-                logger.info(f"SD quality detected ({width}px width), using CRF {crf}")
-
-            # Basic video options
-            video_opts = [
-                '-c:v', 'libsvtav1',
-                '-preset', str(self.config.preset),
-                '-crf', str(crf),
-                '-svtav1-params', self.config.svt_params,
-                '-dolbyvision', 'true'
-            ]
-            
-            # Get crop filter
-            crop_filter = self.detect_crop(input_file) if not self.config.disable_crop else None
-            
-            # Add crop filter if enabled
-            if crop_filter:
-                video_opts.extend(['-vf', crop_filter])
-
-            # Copy subtitles
-            video_opts.extend(['-c:s', 'copy'])
-            
-            # Create temporary video file
-            video_file = work_dir / "video.mkv"
-            
-            # Run FFmpeg for video
-            subprocess.run(
-                [
-                    self.config.ffmpeg, '-hide_banner', '-loglevel', 'info',
-                    '-i', str(input_file),
-                    *video_opts,
+                # Set up file paths
+                audio_file = work_dirs['audio'] / "audio.opus"
+                video_file = work_dirs['root'] / "video.mkv"
+                
+                # Process audio first
+                audio_info = self.audio_processor.get_audio_info(input_file)
+                if audio_info:
+                    self.fmt.print_audio_status(
+                        0,  # track number
+                        audio_info['channels'],
+                        audio_info['layout'],
+                        audio_info['bitrate']
+                    )
+                
+                # Build audio FFmpeg command
+                audio_cmd = [
+                    str(self.config.ffmpeg),
+                    "-hide_banner",
+                    "-loglevel", "info",
+                    "-i", str(input_file),
+                    "-map", "0:a:0",
+                    "-c:a", "libopus",
+                    "-af", "aformat=channel_layouts=7.1|5.1|stereo|mono",
+                    "-application", "audio",
+                    "-vbr", "on",
+                    "-compression_level", "10",
+                    "-frame_duration", "20",
+                    "-b:a", "384k",
+                    "-avoid_negative_ts", "make_zero",
+                    "-f", "matroska",
+                    "-y",
+                    str(audio_file)
+                ]
+                
+                # Print audio FFmpeg command
+                logger.info("FFmpeg command for audio encoding:")
+                logger.info("\n" + self._format_ffmpeg_command(audio_cmd))
+                
+                if not self.audio_processor.encode_audio(input_file, audio_file, work_dirs['audio']):
+                    logger.error("Failed to encode audio")
+                    raise RuntimeError("Audio encoding failed")
+                
+                # Validate audio
+                if not self.audio_processor.validate_audio(audio_file):
+                    logger.error("Audio validation failed")
+                    raise RuntimeError("Audio validation failed")
+                
+                # Build FFmpeg command for Dolby Vision encoding
+                width = self.get_video_width(input_file)
+                if width >= 3840:
+                    crf = self.config.crf_uhd
+                    self.fmt.print_check(f"UHD quality detected ({width}px width), using CRF {crf}")
+                elif width >= 1920:
+                    crf = self.config.crf_hd
+                    self.fmt.print_check(f"HD quality detected ({width}px width), using CRF {crf}")
+                else:
+                    crf = self.config.crf_sd
+                    self.fmt.print_check(f"SD quality detected ({width}px width), using CRF {crf}")
+                
+                # Get hardware acceleration options
+                hw_accel = self._configure_hw_accel()
+                
+                # Construct video FFmpeg command
+                video_cmd = [
+                    str(self.config.ffmpeg),
+                    "-hide_banner",
+                    "-loglevel", "warning",
+                ]
+                
+                # Add hardware acceleration if configured
+                if hw_accel:
+                    video_cmd.extend(hw_accel)
+                
+                # Add input and encoding options
+                video_cmd.extend([
+                    "-i", str(input_file),
+                    "-map", "0:v:0",
+                    "-c:v", "libsvtav1",
+                    "-preset", str(self.config.preset),
+                    "-crf", str(crf),
+                    "-vf", "format=yuv420p10le",
+                    "-color_primaries", "bt2020",
+                    "-color_trc", "smpte2084",
+                    "-colorspace", "bt2020nc",
+                    "-svtav1-params",
+                    f"tune=0:film-grain=8:film-grain-denoise=0:enable-hdr=1:enable-qm=1",
+                    "-stats",
+                    "-y",
                     str(video_file)
-                ],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            
-            # Mux final output
-            self._mux_final_output(video_file, audio_file, input_file, output_file)
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to encode Dolby Vision content: {e}")
-            if e.stderr:
-                logger.error(f"FFmpeg error output: {e.stderr}")
-            raise
-        finally:
-            # Remove this work directory from active set and clean it up
-            self._active_work_dirs.discard(work_dir)
-            if work_dir.exists():
-                logger.info(f"Cleaning up {work_dir}...")
-                try:
-                    shutil.rmtree(work_dir)
-                    logger.info("Cleanup completed")
-                except Exception as e:
-                    logger.error(f"Failed to clean up work directory: {e}")
-                    # Try to clean up with a shell command as fallback
-                    try:
-                        subprocess.run(['rm', '-rf', str(work_dir)], check=True)
-                        logger.info("Cleanup completed using rm command")
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"Failed to clean up work directory using rm command: {e}")
-                    
+                ])
+                
+                # Print video FFmpeg command
+                self.fmt.print_check("FFmpeg command for video encoding:")
+                self.fmt.print_check(self._format_ffmpeg_command(video_cmd))
+                
+                # Run FFmpeg
+                subprocess.run(video_cmd, check=True)
+                
+                # Mux final output
+                self._mux_final_output(video_file, audio_file, input_file, output_file)
+                
+            except Exception as e:
+                logger.error(f"Error processing video: {e}")
+                raise
+
     def get_video_width(self, input_file: Path) -> int:
         """Get video width from input file.
         
@@ -777,7 +929,8 @@ encode_single_segment() {
                 '-c:t', 'copy',          # Copy attachments
                 str(output_file)
             ]
-            
+            logger.info("\nFFmpeg command for muxing tracks:")
+            logger.info("\n" + self._format_ffmpeg_command(cmd))
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             logger.info("Successfully muxed final output")
             

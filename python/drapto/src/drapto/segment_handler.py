@@ -51,12 +51,6 @@ class SegmentHandler:
             ]
             
             subprocess.run(cmd, check=True)
-            
-            # Validate segments
-            if not self.validate_segments(output_dir):
-                self.fmt.print_error("Failed to validate segments")
-                return False
-                
             return True
             
         except subprocess.CalledProcessError as e:

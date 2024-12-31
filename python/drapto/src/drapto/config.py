@@ -49,11 +49,13 @@ class EncodingConfig(BaseModel):
     disable_crop: bool = Field(defaults.DISABLE_CROP, description="Disable automatic crop detection")
     enable_chunked_encoding: bool = Field(defaults.ENABLE_CHUNKED_ENCODING, description="Enable chunked encoding")
     
+    # VMAF settings
+    target_vmaf: float = Field(defaults.TARGET_VMAF, description="Target VMAF score")
+    vmaf_sample_count: int = Field(defaults.VMAF_SAMPLE_COUNT, description="Number of VMAF samples to take")
+    vmaf_sample_length: int = Field(defaults.VMAF_SAMPLE_LENGTH, description="Length of each VMAF sample in seconds")
+    
     # Chunked encoding settings
     segment_length: int = Field(defaults.SEGMENT_LENGTH, description="Length of each segment in seconds")
-    target_vmaf: float = Field(defaults.TARGET_VMAF, description="Target VMAF score")
-    vmaf_sample_count: int = Field(defaults.VMAF_SAMPLE_COUNT, description="Number of VMAF samples")  # Renamed from vmaf_samples
-    vmaf_sample_length: int = Field(defaults.VMAF_SAMPLE_LENGTH, description="Length of each VMAF sample in seconds")
     
     # Directory settings
     temp_dir: Optional[Path] = Field(

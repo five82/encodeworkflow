@@ -1,75 +1,48 @@
 """Audio processing module for drapto."""
 
-import logging
 import subprocess
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 class AudioProcessor:
     """Handles audio processing tasks like encoding and stream analysis."""
 
-    def __init__(self):
+    def __init__(self, fmt):
         """Initialize AudioProcessor."""
-        pass
+        self.fmt = fmt
 
     def get_audio_streams(self, input_file: Path) -> List[Dict[str, Any]]:
-        """Get audio streams from input file.
+        """Get audio streams from input file."""
+        # Run ffprobe
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_streams',
+            '-select_streams', 'a',
+            str(input_file)
+        ]
         
-        Args:
-            input_file: Input video file
-            
-        Returns:
-            List of audio stream info dictionaries
-        """
-        try:
-            input_abs = input_file.resolve()
-            logger.info(f"Getting audio streams from: {input_abs}")
-            
-            # Get detailed stream info
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-select_streams', 'a',
-                '-show_entries', 'stream=index,channels,codec_name,bit_rate,channel_layout',
-                '-of', 'json',
-                str(input_abs)
-            ]
-            logger.debug(f"FFprobe command: {' '.join(map(str, cmd))}")
-            
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            if result.stderr:
-                logger.debug(f"FFprobe stderr: {result.stderr}")
-            
-            data = json.loads(result.stdout)
-            logger.info(f"FFprobe output: {json.dumps(data, indent=2)}")
-            
-            streams = []
-            for stream in data.get('streams', []):
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        probe_data = json.loads(result.stdout)
+        
+        streams = []
+        for stream in probe_data.get('streams', []):
+            if stream.get('codec_type') == 'audio' or 'codec_type' not in stream:
                 stream_info = {
                     'index': stream.get('index', 0),
                     'channels': stream.get('channels', 2),
                     'codec': stream.get('codec_name', 'unknown'),
                     'bitrate': stream.get('bit_rate', 'unknown'),
-                    'layout': stream.get('channel_layout', 'unknown')
+                    'layout': stream.get('channel_layout', 'stereo')
                 }
                 streams.append(stream_info)
-                logger.info(f"Found audio stream: {stream_info}")
-            
-            return streams
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to get audio streams: {e}")
-            if e.stderr:
-                logger.error(f"FFprobe error output: {e.stderr}")
-            raise
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse FFprobe output: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to get audio streams: {e}")
-            raise
+                logger.debug(f"Found audio stream: {stream_info}")
+        
+        return streams
 
     def get_audio_config(self, channels: int) -> Tuple[str, str, int]:
         """Get audio bitrate, layout and channel count based on input channels.
@@ -92,236 +65,208 @@ class AudioProcessor:
             logger.warning(f"Unsupported channel count ({channels}), defaulting to stereo")
             return "128k", "stereo", 2  # Force to stereo for unsupported counts
 
-    def validate_audio_stream(self, file_path: Path, expected_config: Dict[str, Any]) -> bool:
-        """Validate an audio stream matches expected configuration.
+    def validate_audio_stream(self, output_file: Path, expected_config: Dict[str, Any]) -> bool:
+        """Validate encoded audio stream matches expected configuration."""
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_streams',
+            '-select_streams', 'a',
+            str(output_file)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        probe_data = json.loads(result.stdout)
+        
+        if not probe_data.get('streams'):
+            logger.error("No audio streams found in output file")
+            return False
+            
+        stream = probe_data['streams'][0]
+        stream_info = {
+            'codec_name': stream.get('codec_name'),
+            'channels': stream.get('channels'),
+            'channel_layout': stream.get('channel_layout')
+        }
+        
+        # Validate codec
+        if stream_info['codec_name'] != expected_config['codec']:
+            logger.error(f"Codec mismatch: expected {expected_config['codec']}, got {stream_info['codec_name']}")
+            return False
+            
+        # Validate channels
+        if stream_info['channels'] != expected_config['channels']:
+            logger.error(f"Channel count mismatch: expected {expected_config['channels']}, got {stream_info['channels']}")
+            return False
+            
+        # Validate layout
+        if stream_info['channel_layout'] != expected_config['layout']:
+            logger.error(f"Channel layout mismatch: expected {expected_config['layout']}, got {stream_info['channel_layout']}")
+            return False
+            
+        logger.info(f"✓ Audio validation passed: {stream_info['codec_name']}, {stream_info['channels']} channels, {stream_info['channel_layout']} layout")
+        return True
+
+    def get_audio_info(self, input_file: Path) -> Dict[str, Any]:
+        """Get audio information for status messages.
         
         Args:
-            file_path: Path to audio file
-            expected_config: Expected configuration with keys:
-                - codec: Expected codec name
-                - channels: Expected number of channels
-                - bitrate: Expected bitrate in kb/s
-                - layout: Expected channel layout
-                
+            input_file: Input video file
+            
         Returns:
-            True if valid, False if not
+            Dictionary with audio info or None if no audio
         """
         try:
-            logger.info(f"Validating audio stream: {file_path}")
-            logger.info(f"Expected config: {expected_config}")
-            
-            # Get stream info
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-select_streams', 'a:0',
-                '-show_entries', 'stream=codec_name,channels,channel_layout:format=duration',
-                '-of', 'json',
-                str(file_path)
-            ]
-            
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            data = json.loads(result.stdout)
-            
-            if not data.get('streams'):
-                logger.error(f"No audio streams found in {file_path}")
-                return False
+            streams = self.get_audio_streams(input_file)
+            if not streams:
+                return None
                 
-            stream = data['streams'][0]
-            logger.info(f"Found stream info: {json.dumps(stream, indent=2)}")
+            # Get first stream info
+            stream = streams[0]
             
-            # Check codec
-            codec = stream.get('codec_name', 'unknown')
-            if codec != expected_config['codec']:
-                logger.error(f"Wrong codec: expected {expected_config['codec']}, got {codec}")
-                return False
-                
-            # Check channels
-            channels = stream.get('channels', 0)
-            if channels != expected_config['channels']:
-                logger.error(f"Wrong channel count: expected {expected_config['channels']}, got {channels}")
-                return False
-                
-            # Check layout if available
-            if 'channel_layout' in stream:
-                layout = stream.get('channel_layout')
-                if layout != expected_config['layout']:
-                    logger.error(f"Wrong channel layout: expected {expected_config['layout']}, got {layout}")
-                    return False
+            # Get bitrate config
+            bitrate, layout, channels = self.get_audio_config(stream['channels'])
+            bitrate_num = int(bitrate.rstrip('k'))
             
-            # Calculate actual bitrate from file size and duration
-            duration = float(data['format']['duration'])
-            file_size = file_path.stat().st_size
-            actual_bitrate = int((file_size * 8) / (duration * 1000))  # Convert to kbps
-            expected_bitrate = int(expected_config['bitrate'].rstrip('k'))
+            return {
+                'channels': channels,
+                'layout': layout,
+                'bitrate': bitrate_num
+            }
             
-            # Allow 30% variance in bitrate since Opus is VBR
-            if abs(actual_bitrate - expected_bitrate) > (expected_bitrate * 0.3):
-                logger.error(f"Bitrate outside acceptable range: expected ~{expected_bitrate}k ±30%, got {actual_bitrate}k")
-                return False
-                    
-            logger.info(f"Audio validation passed for {file_path}")
-            logger.debug(f"Stream info: {json.dumps(stream, indent=2)}")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to validate audio: {e}")
-            if e.stderr:
-                logger.error(f"FFprobe error output: {e.stderr}")
-            return False
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse FFprobe output: {e}")
-            return False
         except Exception as e:
-            logger.error(f"Failed to validate audio: {e}")
-            return False
+            logger.error(f"Failed to get audio info: {e}")
+            return None
 
-    def encode_audio(self, input_file: Path, output_file: Path) -> bool:
-        """Encode all audio streams from input file using libopus.
+    def _format_ffmpeg_command(self, cmd: list[str]) -> str:
+        """Format FFmpeg command for readable output.
         
-        Uses channel layout filtering to work around a libopus bug where channel
-        mappings can be incorrect. The filter forces libopus to use standard
-        channel layouts (7.1, 5.1, stereo, mono) which prevents mapping issues.
+        Args:
+            cmd: FFmpeg command as list of arguments
+            
+        Returns:
+            Formatted command string
+        """
+        # Group related arguments together
+        formatted_parts = []
+        i = 0
+        while i < len(cmd):
+            if cmd[i].startswith('-'):
+                # Collect all values for this flag
+                values = []
+                i += 1
+                while i < len(cmd) and not cmd[i].startswith('-'):
+                    values.append(cmd[i])
+                    i += 1
+                formatted_parts.append(f"{cmd[i-len(values)-1]} {' '.join(values)}")
+            else:
+                formatted_parts.append(cmd[i])
+                i += 1
+        
+        # Join with newlines and indent
+        return "    " + "\n    ".join(formatted_parts)
+
+    def encode_audio(self, input_file: Path, output_file: Path, work_dir: Path) -> bool:
+        """Encode audio streams from input file to output file.
         
         Args:
             input_file: Input video file
             output_file: Output audio file
-            
+            work_dir: Working directory for intermediate files
+        
         Returns:
             True if successful, False otherwise
         """
         try:
-            input_abs = input_file.resolve()
-            output_abs = output_file.resolve()
-            
-            # Get audio streams
-            streams = self.get_audio_streams(input_abs)
-            if not streams:
-                logger.warning("No audio streams found")
+            # Get audio info
+            audio_info = self.get_audio_info(input_file)
+            if not audio_info:
+                logger.error("No audio info found")
                 return False
-
-            # Create output directory if needed
+                
+            # Ensure output directories exist
+            work_dir.mkdir(parents=True, exist_ok=True)
             output_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Process each audio track separately
-            encoded_tracks = []
+            
+            # Get audio streams from input
+            streams = self.get_audio_streams(input_file)
+            if not streams:
+                logger.error("No audio streams found in input file")
+                return False
+                
+            # Process each audio stream
             for i, stream in enumerate(streams):
-                channels = stream['channels']
-                
-                # Get bitrate, layout and normalized channel count
-                bitrate, layout, norm_channels = self.get_audio_config(channels)
-                logger.info(f"Configuring audio stream {i}: {norm_channels} channels, {layout} layout, {bitrate} bitrate")
-                logger.info(f"Original stream info: {stream}")
-                
-                # Encode audio track
-                track_output = output_file.parent / f"audio-{i}.mkv"
-                track_abs = track_output.resolve()
-                
-                cmd = [
-                    'ffmpeg', '-hide_banner', '-loglevel', 'info',
-                    '-i', str(input_abs),
-                    '-map', f'0:a:{i}',  # Use audio stream index i, not stream['index']
-                    '-c:a', 'libopus',
-                    '-af', 'aformat=channel_layouts=7.1|5.1|stereo|mono',
-                    '-application', 'audio',
-                    '-vbr', 'on',
-                    '-compression_level', '10',
-                    '-frame_duration', '20',
-                    '-b:a', bitrate,
-                    '-avoid_negative_ts', 'make_zero',
-                    '-f', 'matroska',
-                    str(track_abs)
-                ]
-                
-                logger.info(f"FFmpeg command for track {i}: {' '.join(map(str, cmd))}")
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                if result.stderr:
-                    logger.info(f"FFmpeg stderr for track {i}: {result.stderr}")
-                
-                # Validate the encoded track
-                expected_config = {
-                    'codec': 'opus',
-                    'channels': norm_channels,
-                    'bitrate': bitrate,
-                    'layout': layout
-                }
-                
-                if not self.validate_audio_stream(track_abs, expected_config):
-                    logger.error(f"Audio validation failed for track {i}")
-                    return False
-                    
-                encoded_tracks.append(track_abs)
-            
-            # Mux all audio tracks together
-            mux_cmd = [
-                'ffmpeg', '-hide_banner', '-loglevel', 'info'
-            ]
-            
-            # Add each audio track
-            for track in encoded_tracks:
-                mux_cmd.extend(['-i', str(track)])
-            
-            # Add mapping and output
-            for i in range(len(streams)):
-                mux_cmd.extend(['-map', f'{i}:a:0'])
-            
-            mux_cmd.extend([
-                '-c', 'copy',  # Just copy streams, no re-encoding
-                str(output_abs)
-            ])
-            
-            logger.info(f"FFmpeg muxing command: {' '.join(map(str, mux_cmd))}")
-            result = subprocess.run(mux_cmd, check=True, capture_output=True, text=True)
-            if result.stderr:
-                logger.info(f"FFmpeg muxing stderr: {result.stderr}")
-            
-            # Validate final output
-            for i, stream in enumerate(streams):
+                # Configure stream settings
                 channels = stream['channels']
                 bitrate, layout, norm_channels = self.get_audio_config(channels)
                 
-                expected_config = {
-                    'codec': 'opus',
-                    'channels': norm_channels,
-                    'bitrate': bitrate,
-                    'layout': layout
-                }
+                logger.info(f"✓ Processing audio track {i}: {channels} channels, {layout} layout, {bitrate} bitrate")
                 
-                # Use ffprobe to check each stream in the output
+                # Build intermediate output path
+                intermediate_output = work_dir / f"audio-{i}.mkv"
+                
+                # Build ffmpeg command
                 cmd = [
-                    'ffprobe', '-v', 'error',
-                    '-select_streams', f'a:{i}',
-                    '-show_entries', 'stream=codec_name,channels,bit_rate,channel_layout',
-                    '-of', 'json',
-                    str(output_abs)
+                    'ffmpeg',
+                    "-hide_banner",
+                    "-loglevel", "warning",
+                    "-i", str(input_file),
+                    "-map", "0:a:0",
+                    "-c:a", "libopus",
+                    "-af", "aformat=channel_layouts=7.1|5.1|stereo|mono",
+                    "-application", "audio",
+                    "-vbr", "on",
+                    "-compression_level", "10",
+                    "-frame_duration", "20",
+                    "-b:a", "384k",
+                    "-avoid_negative_ts", "make_zero",
+                    "-f", "matroska",
+                    "-y",
+                    str(intermediate_output)
                 ]
                 
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                data = json.loads(result.stdout)
-                logger.info(f"Final output stream {i} info: {json.dumps(data, indent=2)}")
+                # Print command in readable format
+                self.fmt.print_check("FFmpeg command for audio encoding:")
+                self.fmt.print_check(self._format_ffmpeg_command(cmd))
                 
-                if not data.get('streams'):
-                    logger.error(f"No audio stream {i} found in final output")
+                # Run encoding
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    if not intermediate_output.exists():
+                        logger.error("Failed to create output file")
+                        return False
+                        
+                    # Validate encoded audio
+                    expected_config = {
+                        'codec': 'opus',
+                        'channels': norm_channels,
+                        'bitrate': bitrate,
+                        'layout': layout
+                    }
+                    if not self.validate_audio_stream(intermediate_output, expected_config):
+                        return False
+                        
+                    # Copy to final output
+                    cmd = [
+                        'ffmpeg',
+                        "-hide_banner",
+                        "-loglevel", "warning",
+                        "-i", str(intermediate_output),
+                        "-map", '0:a:0',
+                        "-c", 'copy',
+                        str(output_file)
+                    ]
+                    subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"FFmpeg error: {e.stderr}")
                     return False
                     
-                stream_info = data['streams'][0]
-                if stream_info.get('codec_name') != 'opus':
-                    logger.error(f"Wrong codec in final output stream {i}: expected opus, got {stream_info.get('codec_name')}")
-                    return False
-            
-            # Clean up intermediate files
-            for track in encoded_tracks:
-                if track.exists():
-                    track.unlink()
-            
             return True
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to encode audio: {e}")
-            if e.stderr:
-                logger.error(f"FFmpeg error output: {e.stderr}")
-            return False
+            
         except Exception as e:
-            logger.error(f"Failed to encode audio: {e}")
+            logger.error(f"Audio encoding failed: {e}")
             return False
 
     def validate_audio(self, audio_file: Path) -> bool:
