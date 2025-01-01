@@ -3,6 +3,8 @@
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, List
+import os
+import tempfile
 
 from loguru import logger
 
@@ -47,169 +49,93 @@ class VideoEncoder:
             
             # Skip if already encoded successfully
             if output_segment.exists() and output_segment.stat().st_size > 0:
-                self.fmt.print_check(f"Segment already encoded successfully: {segment.name}")
+                self.fmt.print_check(f"\u2713 Segment already encoded: {segment.name}")
                 continue
                 
-            segments.append((segment, output_segment))
+            segments.append(segment)
             
         if not segments:
             self.fmt.print_error("No segments found to encode")
             return False
             
-        # Create command list file
-        cmd_list_file = segments_dir / "commands.txt"
-        with open(cmd_list_file, 'w') as f:
-            for input_segment, output_segment in segments:
-                # Create the command with retries and fallbacks
-                cmd = [
-                    # First attempt with default settings
-                    'ab-av1', 'auto-encode',
-                    '--input', str(input_segment),
-                    '--output', str(output_segment),
-                    '--encoder', 'libsvtav1',
-                    '--min-vmaf', str(self.config.target_vmaf),
-                    '--preset', str(self.config.preset),
-                    '--svt', self.config.svt_params,
-                    '--keyint', '10s',
-                    '--samples', str(self.config.vmaf_sample_count),
-                    '--sample-duration', f"{self.config.vmaf_sample_length}s",
-                    '--vmaf', 'n_subsample=8:pool=harmonic_mean',
-                    '--quiet'
-                ]
-                
-                # Print command in readable format
-                self.fmt.print_check("ab-av1 command:")
-                formatted_cmd = "    " + "\n    ".join([
-                    "ab-av1",
-                    "auto-encode",
-                    *[f"{arg}" for arg in cmd[2:]]
-                ])
-                self.fmt.print_check(formatted_cmd)
-                
-                # Add crop filter if specified
-                if crop_filter:
-                    cmd.extend(['--vfilter', crop_filter])
-                    
-                # Add hardware acceleration if available
-                if self.config.hw_accel_opts:
-                    cmd.extend(['--hwaccel-args', self.config.hw_accel_opts])
-                    
-                # Write the command to the file, properly quoted
-                f.write(' '.join(f"'{arg}'" if ' ' in str(arg) else str(arg) for arg in cmd))
-                f.write(' || ')
-                
-                # Second attempt with more samples
-                cmd = [
-                    'ab-av1', 'auto-encode',
-                    '--input', str(input_segment),
-                    '--output', str(output_segment),
-                    '--encoder', 'libsvtav1',
-                    '--min-vmaf', str(self.config.target_vmaf),
-                    '--preset', str(self.config.preset),
-                    '--svt', self.config.svt_params,
-                    '--keyint', '10s',
-                    '--samples', '6',
-                    '--sample-duration', '2s',
-                    '--vmaf', 'n_subsample=8:pool=harmonic_mean',
-                    '--quiet'
-                ]
-                
-                if crop_filter:
-                    cmd.extend(['--vfilter', crop_filter])
-                    
-                if self.config.hw_accel_opts:
-                    cmd.extend(['--hwaccel-args', self.config.hw_accel_opts])
-                    
-                f.write(' '.join(f"'{arg}'" if ' ' in str(arg) else str(arg) for arg in cmd))
-                f.write(' || ')
-                
-                # Final attempt with lower VMAF target
-                cmd = [
-                    'ab-av1', 'auto-encode',
-                    '--input', str(input_segment),
-                    '--output', str(output_segment),
-                    '--encoder', 'libsvtav1',
-                    '--min-vmaf', str(self.config.target_vmaf - 2),
-                    '--preset', str(self.config.preset),
-                    '--svt', self.config.svt_params,
-                    '--keyint', '10s',
-                    '--samples', '6',
-                    '--sample-duration', '2s',
-                    '--vmaf', 'n_subsample=8:pool=harmonic_mean',
-                    '--quiet'
-                ]
-                
-                if crop_filter:
-                    cmd.extend(['--vfilter', crop_filter])
-                    
-                if self.config.hw_accel_opts:
-                    cmd.extend(['--hwaccel-args', self.config.hw_accel_opts])
-                    
-                f.write(' '.join(f"'{arg}'" if ' ' in str(arg) else str(arg) for arg in cmd))
-                f.write('\n')
-        
-        # Run parallel encoding with minimal output
-        parallel_cmd = [
+        # Encode segments in parallel
+        return self._encode_segments_parallel(segments, output_dir)
+            
+    def _encode_segments_parallel(self, segments: List[Path], output_dir: Path) -> bool:
+        """Encode segments in parallel using GNU parallel."""
+        # Create a temporary script file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+            script_path = f.name
+            # Write the function definition
+            f.write("""
+encode_single_segment() {
+    input_file="$1"
+    output_file="$(dirname "$1")/../encoded/$(basename "$1")"
+    export RUST_LOG=ab_av1=error
+
+    ab-av1 auto-encode \\
+        --input "$input_file" \\
+        --output "$output_file" \\
+        --encoder libsvtav1 \\
+        --min-vmaf {} \\
+        --preset {} \\
+        --svt {} \\
+        --keyint 10s \\
+        --samples {} \\
+        --sample-duration {}s \\
+        --vmaf n_subsample=8:pool=harmonic_mean \\
+        --quiet
+}
+export -f encode_single_segment
+""".format(
+                self.config.target_vmaf,
+                self.config.preset,
+                self.config.svt_params,
+                self.config.vmaf_sample_count,
+                self.config.vmaf_sample_length
+            ))
+
+        # Create the output directory
+        output_dir.mkdir(exist_ok=True)
+
+        # Build parallel command
+        cmd = [
             'parallel',
-            '--will-cite',
-            '--noswap',
-            '--halt', 'soon,fail=1',
-            '--jobs', str(self.config.jobs),
-            '--joblog', str(output_dir / 'parallel.log'),
-            '--line-buffer',
-            '--no-notice',
-            '--no-progress',
-            '--no-bar',
-            '--quiet',
-            'bash -c {}',
-            ':::', str(cmd_list_file)
+            '--jobs', str(self.config.parallel_jobs),
+            '--line-buffer',  # Line buffer output
+            '--no-notice',    # Remove parallel notice
+            '--quiet',        # Reduce parallel's own output
+            '--will-cite',    # Suppress citation notice
+            'source {} && encode_single_segment'.format(script_path),
+            ':::',
+            *[str(s) for s in segments]
         ]
-        
-        # Print the command for debugging
-        self.fmt.print_check("Running parallel command:")
-        formatted_cmd = "    " + "\n    ".join([str(arg) for arg in parallel_cmd])
-        self.fmt.print_check(formatted_cmd)
-        
-        # Create a progress tracker
-        total_segments = len(segments)
-        self.fmt.print_check(f"Processing {total_segments} segments in parallel...")
-        
-        # Run the command and process output
-        completed_segments = 0
-        process = subprocess.Popen(
-            parallel_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-        
-        while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
+
+        # Run encoding
+        try:
+            env = os.environ.copy()
+            env['RUST_LOG'] = 'ab_av1=error'
+            process = subprocess.Popen(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                text=True
+            )
+            
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line.strip():
+                    print(line, end='', flush=True)
                 
-            if "Successfully encoded segment" in line:
-                completed_segments += 1
-                progress = (completed_segments / total_segments) * 100
-                self.fmt.print_check(f"Progress: {progress:.1f}% ({completed_segments}/{total_segments} segments)")
-                
-            # Print important messages
-            if "Running command" in line or "Encoded" in line:
-                self.fmt.print_check(line.strip())
-                
-        # Get the return code
-        return_code = process.wait()
-        if return_code != 0:
-            self.fmt.print_error(f"Error encoding segments: Process returned {return_code}")
+            return process.returncode == 0
+        except subprocess.CalledProcessError as e:
+            self.fmt.print_error(f"Failed to encode segments in parallel: {e}")
             return False
-            
-        self.fmt.print_success("Parallel encoding completed")
-        
-        # Clean up
-        if cmd_list_file.exists():
-            cmd_list_file.unlink()
-            
-        return True
+        finally:
+            # Clean up the temporary script
+            os.unlink(script_path)
         
     def encode_segment(
         self,
@@ -274,15 +200,6 @@ class VideoEncoder:
             '--quiet'
         ]
         
-        # Print command in readable format
-        self.fmt.print_check("ab-av1 command:")
-        formatted_cmd = "    " + "\n    ".join([
-            "ab-av1",
-            "auto-encode",
-            *[f"{arg}" for arg in cmd[2:]]
-        ])
-        self.fmt.print_check(formatted_cmd)
-        
         # Add crop filter if specified
         if crop_filter:
             cmd.extend(['--vfilter', crop_filter])
@@ -291,9 +208,18 @@ class VideoEncoder:
         if self.config.hw_accel_opts:
             cmd.extend(['--hwaccel-args', self.config.hw_accel_opts])
             
+        # Set up environment with RUST_LOG=error
+        env = os.environ.copy()
+        env['RUST_LOG'] = 'ab_av1=error'
+        
         # Run encoding
-        subprocess.run(cmd, check=True)
-        return True
+        try:
+            self.fmt.print_check(f"Running command: {' '.join(str(x) for x in cmd)}")
+            subprocess.run(cmd, check=True, env=env)
+            return True
+        except subprocess.CalledProcessError as e:
+            self.fmt.print_error(f"Failed to encode segment: {e}")
+            return False
             
     def _get_ab_av1_command(
         self,
@@ -312,6 +238,7 @@ class VideoEncoder:
             ab-av1 command string
         """
         cmd = [
+            'env', 'RUST_LOG=ab_av1=error',  # Set environment variable for ab-av1
             'ab-av1', 'auto-encode',
             '--input', str(input_pattern),
             '--output', str(output_pattern),

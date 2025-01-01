@@ -3,6 +3,7 @@
 import argparse
 import sys
 import os
+import logging
 from pathlib import Path
 from typing import Optional, Union, Tuple
 import shutil
@@ -29,11 +30,12 @@ def parse_path(path: str) -> Tuple[Path, str]:
         argparse.ArgumentTypeError: If path is invalid
     """
     try:
-        # Get base directory for videos
-        base_dir = Path("/home/ken/projects/encodeworkflow/videos")
+        # Convert to Path object but don't resolve yet to preserve original path for output
+        p = Path(path)
         
-        # First get absolute path relative to base directory
-        p = base_dir / path
+        # If path is relative, resolve it against current directory
+        if not p.is_absolute():
+            p = Path.cwd() / p
         
         # Handle Silverblue path mapping
         if Path("/run/media").exists() and str(p).startswith("/media/"):
@@ -41,6 +43,9 @@ def parse_path(path: str) -> Tuple[Path, str]:
             
         # Don't resolve output paths since they may not exist yet
         # and we want to preserve trailing slashes
+        if p.exists():
+            p = p.resolve()
+            
         return p, path
     except Exception as e:
         raise argparse.ArgumentTypeError(f"Invalid path: {e}")
@@ -232,6 +237,14 @@ def main() -> int:
             })
         logger.configure(**log_config)
         
+        # Set root logger level
+        logging.getLogger().setLevel(args.log_level)
+        
+        # Disable debug logging for imported modules
+        for name in logging.root.manager.loggerDict:
+            if name != __name__:  # Don't modify our own logger
+                logging.getLogger(name).setLevel(logging.WARNING)
+        
         if args.command == "encode":
             # Print tool paths
             fmt = TerminalFormatter()
@@ -293,6 +306,9 @@ def main() -> int:
         return 1
     except ValueError as e:
         logger.error(f"Invalid input: {e}")
+        return 1
+    except FileExistsError as e:
+        logger.error(f"{e}")
         return 1
     except Exception as e:
         logger.error(f"Error: {e}")

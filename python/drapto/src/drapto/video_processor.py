@@ -52,8 +52,16 @@ class VideoProcessor:
         Args:
             input_file: Input video file
             output_file: Output video file
+        
+        Raises:
+            FileExistsError: If output file already exists
         """
         start_time = time.time()
+        
+        # Check if output file exists
+        if output_file.exists():
+            self.fmt.print_error(f"Output file already exists: {output_file}")
+            raise FileExistsError(f"Output file already exists: {output_file}")
         
         # Print starting info
         self.fmt.print_encode_start(str(input_file), str(output_file))
