@@ -97,26 +97,132 @@ parallel --jobs ${cpu_count} \
 ## 4. Error Recovery
 
 ### Segment Failures
-1. **Detection**
-   - Encoding errors
-   - Validation failures
-   - Resource exhaustion
 
-2. **Recovery Actions**
-   - Segment re-encoding
-   - Parameter adjustment
-   - Resource reallocation
+1. **Pre-encode Validation**
+   ```bash
+   validate_segments() {
+       local dir="$1"
+       local min_file_size=1024  # 1KB minimum
+       
+       # Check segment count
+       local segment_count
+       segment_count=$(find "$dir" -name "*.mkv" -type f | wc -l)
+       [[ $segment_count -lt 1 ]] && error "No segments found in $dir"
+       
+       # Validate each segment
+       local invalid_segments=0
+       while IFS= read -r -d $'\0' segment; do
+           # Check file size and integrity
+           local file_size=$(stat -f%z "$segment")
+           if [[ $file_size -lt $min_file_size ]] || \
+              ! "${FFPROBE}" -v error "$segment" >/dev/null 2>&1; then
+               print_warning "Invalid segment: $segment"
+               ((invalid_segments++))
+           fi
+       done < <(find "$dir" -name "*.mkv" -type f -print0)
+   }
+   ```
 
-### Process Recovery
-1. **Checkpoint System**
-   - Segment completion tracking
-   - Progress persistence
-   - State recovery
+2. **Progressive Retry Strategy**
+   ```bash
+   encode_single_segment() {
+       local segment="$1"
+       local output_segment="$2"
+       local target_vmaf="$3"
+       local vfilter_args="$4"
+       
+       # First attempt: Default settings
+       if ab-av1 auto-encode \
+           --input "$segment" \
+           --output "$output_segment" \
+           --min-vmaf "$target_vmaf" \
+           --preset "$PRESET" \
+           --samples "$VMAF_SAMPLE_COUNT" \
+           --sample-duration "${VMAF_SAMPLE_LENGTH}s" \
+           $vfilter_args; then
+           return 0
+       fi
+       
+       # Second attempt: More samples for better accuracy
+       if ab-av1 auto-encode \
+           --input "$segment" \
+           --output "$output_segment" \
+           --min-vmaf "$target_vmaf" \
+           --preset "$PRESET" \
+           --samples 6 \
+           --sample-duration "2s" \
+           $vfilter_args; then
+           return 0
+       fi
+       
+       # Final attempt: Lower VMAF target
+       local lower_vmaf=$((target_vmaf - 2))
+       if ab-av1 auto-encode \
+           --input "$segment" \
+           --output "$output_segment" \
+           --min-vmaf "$lower_vmaf" \
+           --preset "$PRESET" \
+           --samples 6 \
+           --sample-duration "2s" \
+           $vfilter_args; then
+           return 0
+       fi
+       
+       error "Failed to encode segment after all attempts: $(basename "$segment")"
+       return 1
+   }
+   ```
 
-2. **Cleanup Procedures**
-   - Temporary file removal
-   - Resource release
-   - State reset
+3. **Parallel Processing with Failure Handling**
+   ```bash
+   encode_segments() {
+       # Create output directory
+       mkdir -p "$output_dir"
+       
+       # Process each segment
+       for segment in "$input_dir"/*.mkv; do
+           local output_segment="${output_dir}/$(basename "$segment")"
+           
+           # Skip successful segments
+           if [[ -f "$output_segment" ]] && [[ -s "$output_segment" ]]; then
+               print_check "Already encoded: ${segment_name}"
+               continue
+           fi
+           
+           # Add to parallel queue
+           echo "encode_single_segment '$segment' '$output_segment' \
+                '$target_vmaf' '$vfilter_args'" >> "$cmd_file"
+       done
+       
+       # Run parallel jobs with failure handling
+       parallel --no-notice --line-buffer \
+           --halt soon,fail=1 --jobs 0 :::: "$cmd_file"
+   }
+   ```
+
+Key features of our retry strategy:
+1. **Progressive Enhancement**:
+   - First try: Default settings with configured samples
+   - Second try: Increased samples (6) and longer duration (2s)
+   - Final try: Lower VMAF target (-2) with increased samples
+
+2. **Failure Detection**:
+   - Size validation (minimum 1KB)
+   - File integrity check using ffprobe
+   - Segment count verification
+   - Non-zero output file check
+
+3. **Parallel Processing Safety**:
+   - `--halt soon,fail=1`: Stop all jobs on first failure
+   - `--line-buffer`: Prevent output mixing
+   - Skip already successful segments
+   - Proper cleanup on any failure
+
+4. **Resource Management**:
+   - Temporary file cleanup
+   - Export necessary functions and variables
+   - Proper GNU Parallel configuration
+   - Automatic CPU core detection
 
 ## 5. Performance Optimization
 
