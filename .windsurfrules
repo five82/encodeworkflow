@@ -1,0 +1,91 @@
+## Drapto Python Tool Overview
+
+Drapto supports two distinct encoding paths:
+1. **Dolby Vision Path**: For content with Dolby Vision metadata
+2. **Chunked Encoding Path**: For all other content
+
+The path selection is automatic based on Dolby Vision detection. The chunked encoding path is the default and preferred method, but Dolby Vision content must use the Dolby Vision path due to technical limitations with chunked encoding of Dolby Vision content.
+
+Drapto is a rewrite in Python of the original encode bash scripts.
+
+## Project locations
+
+### Reference encode bash scripts:
+
+/encode.sh
+/encode_audio_functions.sh
+/encode_subtitle_functions.sh
+/encode_config.sh
+/encode_formatting.sh
+/encode_hardware_acceleration.sh
+/encode_processing.sh
+/encode_utilities.sh
+/encode_validation.sh
+/encode_video_functions.sh
+
+### Drapto Python code:
+
+/python/drapto/
+
+### Refactoring documentation:
+
+/python/drapto/src/drapto/docs/refactoring/
+
+### Refactoring plan:
+
+/python/drapto/src/drapto/docs/refactoring/cascade_implementation_plan.md
+
+### Workflow documentation:
+
+/python/drapto/src/drapto/docs/workflow/
+
+
+## AI Assistant Guidelines
+
+### Core Principles
+1. **Atomic Changes**:
+   - Make one logical change at a time
+   - Keep changes small and focused
+   - Ensure each change can be validated independently
+   - Maintain working state between changes
+
+2. **Tool Usage**:
+   - Use `codebase_search` for understanding code context
+   - Use `grep_search` for finding specific patterns
+   - Use `view_file` to examine full implementations
+   - Use `edit_file` for precise, minimal changes
+   - Use `write_to_file` for new components
+
+3. **Error Prevention**:
+   - Validate inputs before processing
+   - Add comprehensive error handling
+   - Include type hints for all parameters
+   - Add assertions for critical assumptions
+
+4. **Code Quality**:
+   - Follow PEP 8 style guide
+   - Add detailed docstrings
+   - Use type hints consistently
+   - Keep functions focused and small
+   - Use descriptive variable names
+
+5. **Testing Strategy**:
+   - Write tests before implementation
+   - Include unit tests for components
+   - Add integration tests for workflows
+   - Test error cases explicitly
+   - Verify resource cleanup
+
+6. **Safety Measures**:
+   - Use feature flags for new code
+   - Log all significant operations
+   - Add validation between steps
+   - Implement rollback mechanisms
+   - Monitor system resources
+
+7. **Documentation**:
+   - Update docs with each change
+   - Add inline code comments
+   - Document error cases
+   - Include usage examples
+   - Note any limitations
