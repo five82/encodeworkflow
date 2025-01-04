@@ -1,358 +1,501 @@
-# Drapto Cascade-Specific Implementation Plan
+# Drapto AI-Assisted Refactoring Plan
 
 ## Overview
-This document outlines the step-by-step refactoring process using Cascade's specific tools and capabilities. Each step includes exact commands and validations.
+This plan is designed for implementation by an AI code assistant. Each step is structured to:
+- Maintain system stability during changes
+- Allow validation between steps
+- Support automatic rollback if needed
+- Enable incremental feature deployment
 
-## Phase 0: Analysis and Preparation
+## AI Assistant Guidelines
 
-### 0.1 Codebase Analysis
+### Core Principles
+1. **Atomic Changes**:
+   - Make one logical change at a time
+   - Keep changes small and focused
+   - Ensure each change can be validated independently
+   - Maintain working state between changes
+
+2. **Tool Usage**:
+   - Use `codebase_search` for understanding code context
+   - Use `grep_search` for finding specific patterns
+   - Use `view_file` to examine full implementations
+   - Use `edit_file` for precise, minimal changes
+   - Use `write_to_file` for new components
+
+3. **Error Prevention**:
+   - Validate inputs before processing
+   - Add comprehensive error handling
+   - Include type hints for all parameters
+   - Add assertions for critical assumptions
+
+4. **Code Quality**:
+   - Follow PEP 8 style guide
+   - Add detailed docstrings
+   - Use type hints consistently
+   - Keep functions focused and small
+   - Use descriptive variable names
+
+5. **Testing Strategy**:
+   - Write tests before implementation
+   - Include unit tests for components
+   - Add integration tests for workflows
+   - Test error cases explicitly
+   - Verify resource cleanup
+
+6. **Safety Measures**:
+   - Use feature flags for new code
+   - Log all significant operations
+   - Add validation between steps
+   - Implement rollback mechanisms
+   - Monitor system resources
+
+7. **Documentation**:
+   - Update docs with each change
+   - Add inline code comments
+   - Document error cases
+   - Include usage examples
+   - Note any limitations
+
+### Implementation Process
+For each change:
+
+1. **Analysis**:
+   ```python
+   # First, understand the context
+   results = codebase_search(
+       Query="relevant functionality",
+       TargetDirectories=["/path/to/code"]
+   )
+   
+   # Then, find specific implementations
+   matches = grep_search(
+       SearchDirectory="/path/to/code",
+       Query="specific pattern",
+       MatchPerLine=True,
+       Includes=["*.py"],
+       CaseInsensitive=False
+   )
+   ```
+
+2. **Implementation**:
+   ```python
+   # Create new file with proper structure
+   write_to_file(
+       TargetFile="/path/to/new/file.py",
+       CodeContent="""
+       \"\"\"Module docstring with purpose.\"\"\"
+       from typing import Optional, List
+       
+       class NewComponent:
+           \"\"\"Class docstring with details.\"\"\"
+           def __init__(self) -> None:
+               self._logger = logging.getLogger(__name__)
+       """,
+       EmptyFile=False
+   )
+   
+   # Make precise edits
+   edit_file(
+       TargetFile="/path/to/existing/file.py",
+       CodeEdit="""
+       {{ ... }}
+       def updated_function(new_param: str) -> bool:
+           \"\"\"Function docstring with changes.\"\"\"
+       {{ ... }}
+       """,
+       Instruction="Update function signature",
+       Blocking=True
+   )
+   ```
+
+3. **Validation**:
+   ```python
+   # Run tests
+   run_command(
+       Command="pytest",
+       ArgsList=["tests/", "-v"],
+       Blocking=True
+   )
+   
+   # Check typing
+   run_command(
+       Command="mypy",
+       ArgsList=["src/"],
+       Blocking=True
+   )
+   ```
+
+### Error Handling
+Always implement proper error handling:
+
 ```python
-# Find all Python files in project
-find_by_name(
-    SearchDirectory="/home/ken/projects/encodeworkflow/python/drapto/src/drapto",
-    Pattern="**/*.py"
-)
-
-# Locate main entry points
-grep_search(
-    SearchDirectory="/home/ken/projects/encodeworkflow/python/drapto/src/drapto",
-    Query="if __name__ == '__main__'",
-    MatchPerLine=true,
-    Includes=["*.py"],
-    CaseInsensitive=false
-)
-
-# Find core classes
-grep_search(
-    SearchDirectory="/home/ken/projects/encodeworkflow/python/drapto/src/drapto",
-    Query="class.*Processor|class.*Handler|class.*Manager",
-    MatchPerLine=true,
-    Includes=["*.py"],
-    CaseInsensitive=false
-)
+class SafeComponent:
+    """Example of proper error handling."""
+    
+    def __init__(self) -> None:
+        self._logger = logging.getLogger(__name__)
+        
+    async def process(self, input_path: Path) -> bool:
+        try:
+            self._logger.info(f"Processing {input_path}")
+            if not input_path.exists():
+                raise FileNotFoundError(f"Input not found: {input_path}")
+                
+            # Core logic here
+            return True
+            
+        except FileNotFoundError as e:
+            self._logger.error(f"Input error: {e}")
+            raise
+            
+        except Exception as e:
+            self._logger.error(f"Unexpected error: {e}")
+            raise RuntimeError(f"Processing failed: {e}")
 ```
 
-### 0.2 Create New Structure
+### Feature Flags
+Use feature flags for safe deployment:
+
 ```python
-# Create core module
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/core/__init__.py",
-    CodeContent="\"\"\"Core domain models and interfaces\"\"\"",
-    EmptyFile=false
-)
+class FeatureFlags:
+    """Manage feature rollout."""
+    
+    def __init__(self) -> None:
+        self._flags = {
+            "new_detection": False,
+            "new_encoding": False
+        }
+        self._logger = logging.getLogger(__name__)
+        
+    def is_enabled(self, flag: str) -> bool:
+        enabled = self._flags.get(flag, False)
+        self._logger.debug(f"Feature flag {flag}: {enabled}")
+        return enabled
 
-# Create services module
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/__init__.py",
-    CodeContent="\"\"\"Service implementations\"\"\"",
-    EmptyFile=false
-)
+## AI Assistant Guidelines
 
-# Create infrastructure module
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/infrastructure/__init__.py",
-    CodeContent="\"\"\"Infrastructure components\"\"\"",
-    EmptyFile=false
-)
+The AI assistant will:
+
+1. **Code Changes**:
+   - Create new files in isolation
+   - Add comprehensive type hints
+   - Include detailed docstrings
+   - Follow PEP 8 style guide
+
+2. **Testing**:
+   - Write tests before implementation
+   - Include both unit and integration tests
+   - Add performance benchmarks
+   - Validate against old implementation
+
+3. **Safety**:
+   - Enable feature flags gradually
+   - Log all significant operations
+   - Handle all potential errors
+   - Provide rollback mechanisms
+
+4. **Documentation**:
+   - Update relevant documentation
+   - Add inline code comments
+   - Document any caveats or limitations
+   - Include usage examples
+
+5. **Validation**:
+   - Run existing test suite
+   - Verify resource cleanup
+   - Check error handling
+   - Monitor performance impact
+
+## Phase 0: Preparation
+
+### 0.1 Initial Analysis
+```python
+# Step 1: Analyze existing codebase structure
+def analyze_codebase():
+    """Find all relevant Python files and their relationships."""
+    # Search for Python files
+    python_files = find_files("**/*.py")
+    
+    # Find main entry points
+    entry_points = grep_search("if __name__ == '__main__'")
+    
+    # Locate core classes
+    core_classes = grep_search("class.*Processor|class.*Handler|class.*Manager")
+
+# Step 2: Create new structure
+def setup_structure():
+    """Create new module structure."""
+    create_dirs = [
+        "core/",
+        "services/",
+        "infrastructure/"
+    ]
+    for dir in create_dirs:
+        Path(dir).mkdir(exist_ok=True)
+```
+
+### 0.2 Test Infrastructure
+```python
+# Step 1: Basic test infrastructure
+class TestCurrentWorkflow:
+    """Baseline tests to ensure no regression."""
+    async def test_basic_encoding(self):
+        """Test current end-to-end flow."""
+        input_path = Path("test_data/sample.mkv")
+        output_path = Path("test_output/encoded.mkv")
+        processor = VideoProcessor()
+        await processor.process_video(input_path, output_path)
+        assert output_path.exists()
+        
+    async def test_dolby_vision(self):
+        """Test Dolby Vision flow."""
+        input_path = Path("test_data/dolby_vision.mkv")
+        output_path = Path("test_output/dv_encoded.mkv")
+        processor = VideoProcessor()
+        await processor.process_video(input_path, output_path)
+        assert output_path.exists()
+
+# Step 2: Track-specific tests
+class TestTrackHandling:
+    """Tests for audio, subtitle, and chapter handling."""
+    async def test_audio_processing(self):
+        """Test audio extraction and encoding."""
+        pass
+        
+    async def test_subtitle_preservation(self):
+        """Test subtitle track handling."""
+        pass
+        
+    async def test_chapter_preservation(self):
+        """Test chapter preservation."""
+        pass
+```
+
+### 0.3 Safety Infrastructure
+```python
+# Step 1: Logging setup
+def setup_logging():
+    """Configure comprehensive logging."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Add file handler for debugging
+    fh = logging.FileHandler('drapto.log')
+    fh.setLevel(logging.DEBUG)
+    logging.getLogger('').addHandler(fh)
+
+# Step 2: Feature flags
+class FeatureFlags:
+    """Safe feature rollout control."""
+    def __init__(self):
+        self._flags = {
+            "new_detection": False,
+            "new_segmentation": False,
+            "new_encoding": False,
+            "new_audio": False,
+            "new_track_handling": False
+        }
+    
+    def is_enabled(self, flag: str) -> bool:
+        return self._flags.get(flag, False)
+        
+    def enable(self, flag: str):
+        if flag in self._flags:
+            self._flags[flag] = True
+
+# Step 3: Performance monitoring
+class PerformanceMonitor:
+    """Track execution time of components."""
+    def __init__(self):
+        self.start_time = None
+        self.checkpoints = {}
+        
+    def start(self):
+        self.start_time = time.time()
+        
+    def checkpoint(self, name: str):
+        self.checkpoints[name] = time.time() - self.start_time
 ```
 
 ## Phase 1: Core Domain Models
 
-### 1.1 Create Base Models
+### 1.1 Create Basic Models
 ```python
-# Create models.py
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/core/models.py",
-    CodeContent="""
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, List, Dict, Any
-
+# Step 1: Video metadata model
 @dataclass
 class VideoMetadata:
+    """Core video properties."""
     path: Path
+    width: int
+    height: int
     is_dolby_vision: bool
-    resolution: tuple[int, int]
     frame_rate: float
     duration: float
 
+# Step 2: Audio metadata model
 @dataclass
-class ProcessingState:
-    stage: str
-    metadata: VideoMetadata
-    resources: Dict[str, Any]
-    errors: List[str]
-""",
-    EmptyFile=false
-)
+class AudioMetadata:
+    """Audio stream properties."""
+    channels: int
+    codec: str
+    bitrate: Optional[int]
+    layout: str
+
+# Step 3: Track metadata model
+@dataclass
+class TrackMetadata:
+    """Complete media track information."""
+    video: VideoMetadata
+    audio: List[AudioMetadata]
+    subtitles: List[str]
+    has_chapters: bool
 ```
 
-### 1.2 Create Interfaces
+### 1.2 Create Path-Specific Models
 ```python
-# Create interfaces.py
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/core/interfaces.py",
-    CodeContent="""
-from typing import Protocol, List, Optional
-from pathlib import Path
-from .models import VideoMetadata, ProcessingState
+# Step 1: Dolby Vision context
+@dataclass
+class DolbyVisionContext:
+    """Dolby Vision encoding parameters."""
+    metadata: TrackMetadata
+    crf: int
+    preset: int
+    hw_accel: Optional[str]
 
-class IDetectionService(Protocol):
-    async def analyze_video(self, input_path: Path) -> VideoMetadata: ...
-    async def detect_dolby_vision(self, input_path: Path) -> bool: ...
-
-class ISegmentationService(Protocol):
-    async def segment_video(self, input_path: Path, work_dir: Path) -> List[Path]: ...
-    async def validate_segments(self, segments: List[Path]) -> bool: ...
-
-class IEncodingService(Protocol):
-    async def encode_video(self, input_path: Path, output_path: Path) -> bool: ...
-    async def validate_output(self, output_path: Path) -> bool: ...
-""",
-    EmptyFile=false
-)
+# Step 2: Chunked encoding context
+@dataclass
+class ChunkedEncodingContext:
+    """Chunked encoding parameters."""
+    metadata: TrackMetadata
+    target_vmaf: float
+    segment_length: int
+    sample_count: int
 ```
 
-## Phase 2: Infrastructure Layer
+## Phase 2: Infrastructure
 
-### 2.1 FFmpeg Wrapper
+### 2.1 FFmpeg Integration
 ```python
-# Create ffmpeg wrapper
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/infrastructure/ffmpeg.py",
-    CodeContent="""
-import asyncio
-import logging
-from pathlib import Path
-from typing import List, Optional
-
-class FFmpegError(Exception):
-    pass
-
+# Step 1: Basic FFmpeg wrapper
 class FFmpegWrapper:
-    def __init__(self):
-        self._logger = logging.getLogger(__name__)
+    def __init__(self, binary_path: Path):
+        self.binary_path = binary_path
+        
+    async def probe_file(self, input_path: Path) -> dict:
+        pass
 
-    async def run_command(self, args: List[str]) -> str:
-        try:
-            process = await asyncio.create_subprocess_exec(
-                'ffmpeg',
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            if process.returncode != 0:
-                raise FFmpegError(f"FFmpeg failed: {stderr.decode()}")
-            return stdout.decode()
-        except Exception as e:
-            self._logger.error(f"FFmpeg error: {e}")
-            raise
-""",
-    EmptyFile=false
-)
+# Step 2: Add hardware acceleration
+class HardwareAcceleration:
+    def detect_support(self) -> Optional[str]:
+        pass
+        
+    def get_options(self) -> List[str]:
+        pass
+
+# Step 3: Add track extraction
+class TrackExtractor:
+    def extract_audio(self, input_path: Path, output_path: Path) -> bool:
+        pass
+        
+    def extract_subtitles(self, input_path: Path, output_dir: Path) -> List[Path]:
+        pass
 ```
 
-### 2.2 Resource Manager
+## Phase 3: Services
+
+### 3.1 Detection Services
 ```python
-# Create resource manager
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/infrastructure/resources.py",
-    CodeContent="""
-import logging
-from pathlib import Path
-from typing import Set, Dict, Any
+# Step 1: Basic video analysis
+class VideoAnalyzer:
+    def analyze_metadata(self, path: Path) -> VideoMetadata:
+        pass
 
-class Resource:
-    def __init__(self, name: str, path: Optional[Path] = None):
-        self.name = name
-        self.path = path
-        self.is_active = False
+# Step 2: Audio analysis
+class AudioAnalyzer:
+    def analyze_streams(self, path: Path) -> List[AudioMetadata]:
+        pass
 
-class ResourceManager:
-    def __init__(self):
-        self._resources: Dict[str, Resource] = {}
-        self._logger = logging.getLogger(__name__)
-
-    async def acquire(self, name: str, path: Optional[Path] = None) -> Resource:
-        resource = Resource(name, path)
-        resource.is_active = True
-        self._resources[name] = resource
-        self._logger.info(f"Acquired resource: {name}")
-        return resource
-
-    async def release(self, name: str) -> None:
-        if resource := self._resources.get(name):
-            resource.is_active = False
-            self._logger.info(f"Released resource: {name}")
-""",
-    EmptyFile=false
-)
+# Step 3: Track analysis
+class TrackAnalyzer:
+    def analyze_all(self, path: Path) -> TrackMetadata:
+        pass
 ```
 
-## Phase 3: Detection Service
-
-### 3.1 Create Service
+### 3.2 Encoding Services
 ```python
-# Create detection service
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/detection.py",
-    CodeContent="""
-import logging
-from pathlib import Path
-from typing import Optional
-from ..core.models import VideoMetadata
-from ..core.interfaces import IDetectionService
-from ..infrastructure.ffmpeg import FFmpegWrapper
-
-class DetectionService(IDetectionService):
-    def __init__(self, ffmpeg: FFmpegWrapper):
-        self._ffmpeg = ffmpeg
-        self._logger = logging.getLogger(__name__)
-
-    async def analyze_video(self, input_path: Path) -> VideoMetadata:
-        # Implementation
+# Step 1: Audio encoding
+class AudioEncoder:
+    def encode_opus(self, input_path: Path, output_path: Path, metadata: AudioMetadata) -> bool:
         pass
 
-    async def detect_dolby_vision(self, input_path: Path) -> bool:
-        # Implementation
+# Step 2: Dolby Vision encoding
+class DolbyVisionEncoder:
+    def encode(self, context: DolbyVisionContext) -> bool:
         pass
-""",
-    EmptyFile=false
-)
+
+# Step 3: Chunked encoding
+class ChunkedEncoder:
+    def encode_segment(self, segment: Path, context: ChunkedEncodingContext) -> bool:
+        pass
 ```
 
-### 3.2 Move Legacy Code
-```python
-# First find legacy detection code
-grep_search(
-    SearchDirectory="/home/ken/projects/encodeworkflow/python/drapto/src/drapto",
-    Query="def detect|def analyze",
-    MatchPerLine=true,
-    Includes=["*.py"],
-    CaseInsensitive=false
-)
+## Phase 4: Resource Management
 
-# Move to legacy module
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/legacy/detection.py",
-    CodeContent="# Legacy detection code moved here",
-    EmptyFile=false
-)
+### 4.1 Work Directory Management
+```python
+# Step 1: Basic directory structure
+class WorkDirectoryManager:
+    def create_structure(self) -> Dict[str, Path]:
+        pass
+
+# Step 2: Resource cleanup
+class ResourceCleaner:
+    def cleanup(self, work_dirs: Dict[str, Path]) -> None:
+        pass
 ```
 
-## Phase 4: Segmentation Service
-
-### 4.1 Create Service
+### 4.2 Track Management
 ```python
-# Create segmentation service
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/segmentation.py",
-    CodeContent="""
-import logging
-from pathlib import Path
-from typing import List
-from ..core.interfaces import ISegmentationService
-from ..infrastructure.ffmpeg import FFmpegWrapper
-from ..infrastructure.resources import ResourceManager
-
-class SegmentationService(ISegmentationService):
-    def __init__(self, 
-                 ffmpeg: FFmpegWrapper,
-                 resource_manager: ResourceManager):
-        self._ffmpeg = ffmpeg
-        self._resources = resource_manager
-        self._logger = logging.getLogger(__name__)
-
-    async def segment_video(self, 
-                          input_path: Path,
-                          work_dir: Path) -> List[Path]:
-        # Implementation
+# Step 1: Track extraction
+class TrackManager:
+    def extract_tracks(self, input_path: Path, work_dirs: Dict[str, Path]) -> None:
         pass
 
-    async def validate_segments(self, segments: List[Path]) -> bool:
-        # Implementation
+# Step 2: Track muxing
+class TrackMuxer:
+    def mux_tracks(self, tracks: Dict[str, Path], output_path: Path) -> bool:
         pass
-""",
-    EmptyFile=false
-)
 ```
 
-## Phase 5: Encoding Service
+## Phase 5: Integration
 
-### 5.1 Create Base Service
+### 5.1 Path-Specific Processors
 ```python
-# Create encoding base
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/encoding/base.py",
-    CodeContent="""
-from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Optional
-from ...core.interfaces import IEncodingService
-from ...infrastructure.ffmpeg import FFmpegWrapper
-
-class BaseEncoder(IEncodingService, ABC):
-    def __init__(self, ffmpeg: FFmpegWrapper):
-        self._ffmpeg = ffmpeg
-
-    @abstractmethod
-    async def encode_video(self, 
-                          input_path: Path,
-                          output_path: Path) -> bool:
+# Step 1: Dolby Vision processor
+class DolbyVisionProcessor:
+    def process(self, context: DolbyVisionContext) -> bool:
         pass
 
-    @abstractmethod
-    async def validate_output(self, output_path: Path) -> bool:
+# Step 2: Chunked encoding processor
+class ChunkedProcessor:
+    def process(self, context: ChunkedEncodingContext) -> bool:
         pass
-""",
-    EmptyFile=false
-)
 ```
 
-### 5.2 Create Specific Encoders
+### 5.2 Main Processor
 ```python
-# Create DV encoder
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/encoding/dolby_vision.py",
-    CodeContent="""
-from pathlib import Path
-from .base import BaseEncoder
-
-class DolbyVisionEncoder(BaseEncoder):
-    async def encode_video(self,
-                          input_path: Path,
-                          output_path: Path) -> bool:
-        # Implementation
+# Step 1: Path selection
+class PathSelector:
+    def select_path(self, metadata: TrackMetadata) -> str:
         pass
 
-    async def validate_output(self, output_path: Path) -> bool:
-        # Implementation
+# Step 2: Main processor
+class VideoProcessor:
+    def process_video(self, input_path: Path, output_path: Path) -> bool:
         pass
-""",
-    EmptyFile=false
-)
-
-# Create SVT encoder
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/encoding/svt.py",
-    CodeContent="""
-from pathlib import Path
-from .base import BaseEncoder
-
-class SVTEncoder(BaseEncoder):
-    async def encode_video(self,
-                          input_path: Path,
-                          output_path: Path) -> bool:
-        # Implementation
-        pass
-
-    async def validate_output(self, output_path: Path) -> bool:
-        # Implementation
-        pass
-""",
-    EmptyFile=false
-)
 ```
 
 ## Phase 6: Orchestration
@@ -360,20 +503,6 @@ class SVTEncoder(BaseEncoder):
 ### 6.1 Create Orchestrator
 ```python
 # Create orchestrator
-write_to_file(
-    TargetFile="/home/ken/projects/encodeworkflow/python/drapto/src/drapto/services/orchestrator.py",
-    CodeContent="""
-import logging
-from pathlib import Path
-from typing import Optional
-from ..core.interfaces import (
-    IDetectionService,
-    ISegmentationService,
-    IEncodingService
-)
-from ..core.models import ProcessingState
-from ..infrastructure.resources import ResourceManager
-
 class VideoOrchestrator:
     def __init__(self,
                  detection: IDetectionService,
@@ -395,9 +524,6 @@ class VideoOrchestrator:
         except Exception as e:
             self._logger.error(f"Processing failed: {e}")
             return False
-""",
-    EmptyFile=false
-)
 ```
 
 ## Phase 7: CLI Updates
