@@ -179,7 +179,20 @@ Used exclusively for content containing Dolby Vision metadata.
    - Analyze input for Dolby Vision metadata
    - Validate Dolby Vision profile compatibility
 
-2. **Video Encoding**
+2. **Audio Processing**
+   - Extract audio streams
+   - Convert to Opus format with adaptive bitrate:
+     ```bash
+     # Bitrate selection based on channels
+     mono:  64k   (1 channel)
+     stereo: 128k (2 channels)
+     5.1:    256k (6 channels)
+     7.1:    384k (8 channels)
+     ```
+   - Preserve original channel layout
+   - Validate encoded audio streams
+
+3. **Video Encoding**
    - Uses FFmpeg with SVT-AV1 encoder
    - Direct single-pass encoding
    - Preserves Dolby Vision metadata
@@ -190,25 +203,51 @@ Used exclusively for content containing Dolby Vision metadata.
        -preset ${preset} \
        ${svt_params} \
        -pix_fmt yuv420p10le \
+       -dolbyvision true \
        output.mkv
      ```
 
-3. **Validation**
+4. **Track Muxing**
+   - Copy video track from encoded file
+   - Copy audio track from Opus encode
+   - Copy subtitles from original file
+   - Copy chapters from original file
+   - Copy attachments from original file
+   - Example command:
+     ```bash
+     ffmpeg -i video.mkv -i audio.opus -i original.mkv \
+       -map 0:v:0 \  # Video from encoded file
+       -map 1:a? \   # Audio from opus encode
+       -map 2:s? \   # Subtitles from original
+       -map 2:t? \   # Attachments from original
+       -c copy \
+       output.mkv
+     ```
+
+5. **Validation**
    - Verify Dolby Vision metadata preservation
+   - Check audio stream integrity
+   - Validate subtitle tracks
+   - Verify chapter markers
    - Check output file integrity
-   - Validate stream properties
 
 ## Chunked Encoding Path
 
 Default path for all non-Dolby Vision content.
 
 ### Process Flow
-1. **Segmentation**
+1. **Audio Processing**
+   - Same process as Dolby Vision path
+   - Extract and encode to Opus
+   - Validate encoded audio
+
+2. **Segmentation**
    - Split video into chunks at keyframes
    - Preserve frame accuracy
    - Maintain metadata consistency
+   - Audio processed separately
 
-2. **Parallel Encoding**
+3. **Parallel Encoding**
    - Uses ab-av1 for chunk encoding
    - SVT-AV1 as the underlying codec
    - GNU Parallel for parallel processing
@@ -218,20 +257,25 @@ Default path for all non-Dolby Vision content.
        --input segment.mkv \
        --output encoded_segment.mkv \
        --encoder libsvtav1 \
+       --min-vmaf "$target_vmaf" \
        --preset ${preset} \
        ${svt_params} \
        --keyint 10s
      ```
 
-3. **Validation**
+4. **Validation & Concatenation**
    - Per-chunk integrity checks
    - Frame count verification
    - Stream consistency validation
-
-4. **Concatenation**
    - Merge encoded chunks
    - Verify seamless transitions
-   - Final stream validation
+
+5. **Track Muxing**
+   - Same process as Dolby Vision path
+   - Concatenated video track
+   - Opus audio track
+   - Original subtitles and chapters
+   - Original attachments
 
 ## Validation Process
 
