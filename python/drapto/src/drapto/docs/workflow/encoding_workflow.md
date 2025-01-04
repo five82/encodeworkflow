@@ -64,51 +64,111 @@ Both paths use the same audio processing workflow to maintain consistency:
 ## Quality Settings
 
 ### Resolution-Based Configuration
-1. **SD (≤1280p)**
-   ```python
-   {
-       "crf": 30,
-       "preset": 8,
-       "pix_fmt": "yuv420p"
-   }
-   ```
+```bash
+# Default quality settings for different resolutions
+CRF_SD=25   # For width <= 1280 (720p)
+CRF_HD=25   # For width <= 1920 (1080p)
+CRF_UHD=29  # For width > 1920 (4K+)
 
-2. **HD (≤1920p)**
-   ```python
-   {
-       "crf": 32,
-       "preset": 8,
-       "pix_fmt": "yuv420p"
-   }
-   ```
+# Default preset and pixel format
+PRESET=6
+PIX_FMT="yuv420p10le"  # 10-bit for HDR compatibility
+```
 
-3. **UHD (>1920p)**
-   ```python
-   {
-       "crf": 34,
-       "preset": 8,
-       "pix_fmt": "yuv420p10le"  # 10-bit for HDR
-   }
-   ```
+### Chunked Encoding Path (ab-av1)
+```bash
+# ab-av1 auto-encode settings
+ab-av1 auto-encode \
+    --input "$segment" \
+    --output "$output_segment" \
+    --encoder libsvtav1 \
+    --min-vmaf "$target_vmaf" \  # Default: 93
+    --preset "$PRESET" \         # Default: 6
+    --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+    --keyint 10s \
+    --samples "$VMAF_SAMPLE_COUNT" \      # Default: 3
+    --sample-duration "${VMAF_SAMPLE_LENGTH}s" \  # Default: 1s
+    --vmaf "n_subsample=8:pool=harmonic_mean" \
+    --quiet
+```
 
-### SVT-AV1 Parameters
-```python
-svt_params = {
-    "tune": 0,           # Visual quality tuning
-    "film-grain": 8,     # Film grain synthesis level
-    "keyint": "10s",     # Keyframe interval
-    "sc-detection": 1    # Scene change detection
+### Dolby Vision Path (FFmpeg)
+```bash
+# FFmpeg with SVT-AV1 settings
+ffmpeg -i "$input_file" \
+    -c:v libsvtav1 \
+    -preset "$PRESET" \
+    -crf "$crf" \
+    -svtav1-params "tune=0:film-grain=0:film-grain-denoise=0" \
+    -dolbyvision true \
+    -pix_fmt yuv420p10le \
+    "$output_file"
+```
+
+Key differences between paths:
+1. **Dolby Vision Path**
+   - Uses direct FFmpeg encoding
+   - CRF-based rate control
+   - Fixed preset and pixel format
+   - Dolby Vision metadata preservation
+
+2. **Chunked Encoding Path**
+   - Uses ab-av1 for quality-targeted encoding
+   - VMAF-based rate control
+   - Configurable sample count and duration
+   - Parallel segment processing
+
+Common settings for both paths:
+- SVT-AV1 encoder
+- Preset 6 (balanced speed/quality)
+- 10-bit pixel format
+- Film grain synthesis disabled
+- Quality-focused tuning (tune=0)
+
+### Hardware Acceleration
+```bash
+# Check for hardware acceleration support
+check_hardware_acceleration() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Check for macOS VideoToolbox support
+        if "${FFMPEG}" -hide_banner -hwaccels | grep -q videotoolbox; then
+            echo "Found VideoToolbox hardware acceleration"
+            export HW_ACCEL="videotoolbox"
+            return 0
+        fi
+    fi
+
+    # No supported hardware acceleration found
+    echo "No supported hardware acceleration found, using software decoding"
+    export HW_ACCEL="none"
+    return 1
+}
+
+# Configure hardware acceleration options
+configure_hw_accel_options() {
+    case "${HW_ACCEL}" in
+        "videotoolbox")
+            hw_options="-hwaccel videotoolbox"
+            ;;
+        *)
+            hw_options=""
+            ;;
+    esac
 }
 ```
 
-### Hardware Acceleration
-```python
-# NVIDIA GPU acceleration
-hw_accel_opts = "-hwaccel cuda -hwaccel_output_format cuda"
+Our implementation currently supports:
+1. **macOS VideoToolbox**
+   - Automatic detection
+   - Hardware-accelerated decoding
+   - Used when available on macOS systems
 
-# CPU-only encoding
-hw_accel_opts = None
-```
+2. **Software Fallback**
+   - Default when no hardware acceleration is available
+   - Pure CPU-based processing
+   - Compatible with all platforms
+
+Note: While VAAPI support may be added in the future, it is not currently implemented in our codebase.
 
 ## Dolby Vision Path
 
