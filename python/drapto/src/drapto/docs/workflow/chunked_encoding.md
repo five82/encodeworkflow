@@ -134,3 +134,58 @@ parallel --jobs ${cpu_count} \
 - Cleanup strategies
 - Space monitoring
 - I/O optimization
+
+## 6. Resource Monitoring
+
+### System Resources
+1. **CPU Monitoring**
+   ```python
+   # Get available CPU count
+   cpu_count = len(os.sched_getaffinity(0))
+   
+   # Reserve cores for system
+   worker_count = max(1, cpu_count - 2)
+   ```
+
+2. **Memory Tracking**
+   ```python
+   # Per-process memory limit
+   memory_per_process = total_memory // worker_count
+   
+   # Set ulimit for child processes
+   resource.setrlimit(
+       resource.RLIMIT_AS,
+       (memory_per_process, memory_per_process)
+   )
+   ```
+
+3. **Storage Management**
+   ```python
+   # Required space calculation
+   required_space = input_size * 1.5  # 50% buffer
+   
+   # Cleanup trigger
+   cleanup_threshold = 0.9  # 90% disk usage
+   ```
+
+### Process Management
+1. **Worker Control**
+   ```bash
+   # GNU Parallel job control
+   parallel --jobs ${worker_count} \
+     --memfree ${memory_per_process} \
+     --load ${max_load} \
+     encode_single_segment
+   ```
+
+2. **Progress Tracking**
+   - Per-segment progress
+   - Overall completion
+   - Time estimation
+   - Resource usage
+
+3. **Error Handling**
+   - Process timeout
+   - Resource exhaustion
+   - I/O errors
+   - Signal handling

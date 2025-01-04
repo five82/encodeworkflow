@@ -22,6 +22,94 @@ Both paths share these initial steps:
    - Channel layout preservation
    - This process is identical for both paths to maintain consistency
 
+## Audio Processing
+
+Both paths use the same audio processing workflow to maintain consistency:
+
+1. **Stream Analysis**
+   - Extract stream information
+   - Detect channel layout
+   - Analyze bitrate requirements
+
+2. **Audio Configuration**
+   ```python
+   # Bitrate selection based on channels
+   bitrate_map = {
+       1: "64k",    # Mono
+       2: "96k",    # Stereo
+       6: "192k",   # 5.1
+       8: "256k"    # 7.1
+   }
+   ```
+
+3. **Encoding Process**
+   - Convert to Opus format
+   - Preserve channel layout
+   - Maintain synchronization
+   - Example command:
+     ```bash
+     ffmpeg -i input.mkv \
+       -c:a libopus \
+       -b:a ${bitrate} \
+       -channel_layout ${layout} \
+       -vn output.opus
+     ```
+
+4. **Validation**
+   - Check stream count
+   - Verify channel layout
+   - Validate bitrate
+   - Ensure sync
+
+## Quality Settings
+
+### Resolution-Based Configuration
+1. **SD (≤1280p)**
+   ```python
+   {
+       "crf": 30,
+       "preset": 8,
+       "pix_fmt": "yuv420p"
+   }
+   ```
+
+2. **HD (≤1920p)**
+   ```python
+   {
+       "crf": 32,
+       "preset": 8,
+       "pix_fmt": "yuv420p"
+   }
+   ```
+
+3. **UHD (>1920p)**
+   ```python
+   {
+       "crf": 34,
+       "preset": 8,
+       "pix_fmt": "yuv420p10le"  # 10-bit for HDR
+   }
+   ```
+
+### SVT-AV1 Parameters
+```python
+svt_params = {
+    "tune": 0,           # Visual quality tuning
+    "film-grain": 8,     # Film grain synthesis level
+    "keyint": "10s",     # Keyframe interval
+    "sc-detection": 1    # Scene change detection
+}
+```
+
+### Hardware Acceleration
+```python
+# NVIDIA GPU acceleration
+hw_accel_opts = "-hwaccel cuda -hwaccel_output_format cuda"
+
+# CPU-only encoding
+hw_accel_opts = None
+```
+
 ## Dolby Vision Path
 
 Used exclusively for content containing Dolby Vision metadata.
@@ -84,6 +172,61 @@ Default path for all non-Dolby Vision content.
    - Merge encoded chunks
    - Verify seamless transitions
    - Final stream validation
+
+## Validation Process
+
+### Common Validation Steps
+1. **Dependency Checks**
+   - FFmpeg availability
+   - FFprobe availability
+   - GNU Parallel (for chunked encoding)
+   - ab-av1 (for chunked encoding)
+
+2. **Input Validation**
+   - File existence
+   - Format compatibility
+   - Stream analysis
+   - Permission checks
+
+3. **Output Validation**
+   - File size verification
+   - Duration match
+   - Stream count check
+   - Codec verification
+
+### Dolby Vision Path Validation
+1. **DV Metadata**
+   - Profile verification
+   - Level verification
+   - Color space check
+
+2. **Stream Properties**
+   - Resolution match
+   - Frame rate match
+   - HDR metadata
+
+### Chunked Encoding Validation
+1. **Segment Validation**
+   - Duration consistency
+   - Frame alignment
+   - Stream properties
+   - Size verification
+
+2. **Concatenation Check**
+   - Stream continuity
+   - Frame transitions
+   - Metadata consistency
+
+### Error Recovery
+1. **Segment Failures**
+   - Individual retry
+   - Parameter adjustment
+   - Skip on threshold
+
+2. **Process Recovery**
+   - Checkpoint system
+   - State restoration
+   - Resource cleanup
 
 ## Final Steps
 
