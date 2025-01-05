@@ -1,114 +1,110 @@
-"""Base classes and interfaces for resource monitoring."""
+"""Resource monitoring utilities."""
 
 import os
 import psutil
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Optional, Dict, Any, Union
 from dataclasses import dataclass
+
+from drapto.config import EncodingConfig
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class SystemResources:
-    """System resource snapshot."""
+    """System resource information."""
     cpu_percent: float
     memory_percent: float
-    disk_free_bytes: int
-    disk_total_bytes: int
-    
-    @property
-    def disk_free_gb(self) -> float:
-        """Get free disk space in GB."""
-        return self.disk_free_bytes / (1024 * 1024 * 1024)
-    
-    @property
-    def disk_total_gb(self) -> float:
-        """Get total disk space in GB."""
-        return self.disk_total_bytes / (1024 * 1024 * 1024)
-    
-    @property
-    def disk_percent(self) -> float:
-        """Get disk usage percentage."""
-        return (1 - (self.disk_free_bytes / self.disk_total_bytes)) * 100
+    disk_percent: float
+    disk_free_gb: float
 
 class ResourceMonitor:
-    """Monitor system resources during encoding."""
+    """Monitor system resources."""
     
-    def __init__(self, min_disk_gb: float = 10.0, max_cpu_percent: float = 90.0, max_memory_percent: float = 90.0):
-        """Initialize resource monitor.
-        
-        Args:
-            min_disk_gb: Minimum required free disk space in GB
-            max_cpu_percent: Maximum allowed CPU usage percentage
-            max_memory_percent: Maximum allowed memory usage percentage
-        """
-        self._min_disk_bytes = min_disk_gb * 1024 * 1024 * 1024
-        self._max_cpu_percent = max_cpu_percent
-        self._max_memory_percent = max_memory_percent
+    def __init__(self, config: Union[Dict[str, Any], EncodingConfig]):
+        """Initialize monitor with config."""
+        self.config = config
         self._logger = logging.getLogger(__name__)
-    
+        
     def get_resources(self, path: Optional[Path] = None) -> SystemResources:
-        """Get current system resource usage.
-        
-        Args:
-            path: Optional path to check disk space for. If not provided,
-                 uses the current working directory.
-                 
-        Returns:
-            SystemResources object with current usage
-        """
-        path = path or Path.cwd()
-        
-        # Get disk usage for path
-        disk_usage = psutil.disk_usage(str(path))
-        
-        # Get CPU and memory usage
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        """Get current resource usage."""
+        cpu_percent = psutil.cpu_percent()
         memory = psutil.virtual_memory()
+        
+        # Get disk usage for path or current directory
+        disk_path = path if path else Path.cwd()
+        disk = psutil.disk_usage(disk_path)
+        disk_free_gb = disk.free / (1024 * 1024 * 1024)  # Convert to GB
+        disk_percent = disk.percent
         
         return SystemResources(
             cpu_percent=cpu_percent,
             memory_percent=memory.percent,
-            disk_free_bytes=disk_usage.free,
-            disk_total_bytes=disk_usage.total
+            disk_percent=disk_percent,
+            disk_free_gb=disk_free_gb
         )
     
-    def check_resources(self, path: Optional[Path] = None) -> bool:
-        """Check if system resources are within acceptable limits.
-        
-        Args:
-            path: Optional path to check disk space for
-            
-        Returns:
-            True if resources are available, False otherwise
-        """
+    def _get_config_value(self, key: str, default: Any) -> Any:
+        """Get config value handling both dict and EncodingConfig."""
+        if isinstance(self.config, dict):
+            return self.config.get(key, default)
+        return getattr(self.config, key, default)
+    
+    def check_resources(self, path: Optional[Path] = None, input_size: Optional[int] = None) -> bool:
+        """Check if system has enough resources."""
         try:
             resources = self.get_resources(path)
             
-            if resources.disk_free_bytes < self._min_disk_bytes:
+            # Get config values
+            min_disk_gb = self._get_config_value('min_disk_gb', 50.0)
+            max_cpu_percent = self._get_config_value('max_cpu_percent', 80.0)
+            max_memory_percent = self._get_config_value('max_memory_percent', 80.0)
+            disk_buffer_factor = self._get_config_value('disk_buffer_factor', 1.5)
+            enable_chunked_encoding = self._get_config_value('enable_chunked_encoding', False)
+            segment_length = self._get_config_value('segment_length', 1)
+            
+            # Calculate required disk space
+            required_gb = min_disk_gb
+            if input_size:
+                # For chunked encoding, we need space for:
+                # 1. Input file copy (if not in work dir)
+                # 2. Temporary chunks
+                # 3. Encoded chunks
+                # 4. Final output
+                # Plus buffer factor for safety
+                if enable_chunked_encoding:
+                    chunk_space = input_size * (1 + 1/segment_length)
+                    required_bytes = (input_size + chunk_space) * disk_buffer_factor
+                    required_gb += required_bytes / (1024 * 1024 * 1024)
+                else:
+                    # For non-chunked, just input + output + buffer
+                    required_bytes = input_size * 2 * disk_buffer_factor
+                    required_gb += required_bytes / (1024 * 1024 * 1024)
+            
+            # Check resources
+            if resources.disk_free_gb < required_gb:
                 self._logger.error(
-                    f"Insufficient disk space. Required: {self._min_disk_bytes / (1024**3):.1f}GB, "
+                    f"Not enough disk space. Required: {required_gb:.1f}GB, "
                     f"Available: {resources.disk_free_gb:.1f}GB"
                 )
                 return False
                 
-            if resources.cpu_percent > self._max_cpu_percent:
+            if resources.cpu_percent > max_cpu_percent:
                 self._logger.error(
-                    f"CPU usage too high. Maximum: {self._max_cpu_percent}%, "
+                    f"CPU usage too high. Maximum: {max_cpu_percent}%, "
                     f"Current: {resources.cpu_percent:.1f}%"
                 )
                 return False
                 
-            if resources.memory_percent > self._max_memory_percent:
+            if resources.memory_percent > max_memory_percent:
                 self._logger.error(
-                    f"Memory usage too high. Maximum: {self._max_memory_percent}%, "
+                    f"Memory usage too high. Maximum: {max_memory_percent}%, "
                     f"Current: {resources.memory_percent:.1f}%"
                 )
                 return False
-                
-            return True
             
+            return True
         except Exception as e:
             self._logger.error(f"Resource check failed: {str(e)}")
             return False

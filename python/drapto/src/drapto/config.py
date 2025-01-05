@@ -89,6 +89,24 @@ class EncodingConfig(BaseModel):
         description="Number of parallel jobs"
     )
     
+    # Resource monitoring settings
+    min_disk_gb: float = Field(
+        defaults.MIN_DISK_GB,
+        description="Minimum required free disk space in GB"
+    )
+    max_cpu_percent: float = Field(
+        defaults.MAX_CPU_PERCENT,
+        description="Maximum allowed CPU usage percentage"
+    )
+    max_memory_percent: float = Field(
+        defaults.MAX_MEMORY_PERCENT,
+        description="Maximum allowed memory usage percentage"
+    )
+    disk_buffer_factor: float = Field(
+        defaults.DISK_BUFFER_FACTOR,
+        description="Buffer factor for disk space (input_size * factor)"
+    )
+    
     def __init__(
         self,
         target_vmaf: float = 95,
@@ -99,20 +117,13 @@ class EncodingConfig(BaseModel):
         hw_accel_opts: Optional[str] = None,
         working_dir: Optional[Path] = None,
         temp_dir: Optional[Path] = None,
-        **data
+        min_disk_gb: float = defaults.MIN_DISK_GB,
+        max_cpu_percent: float = defaults.MAX_CPU_PERCENT,
+        max_memory_percent: float = defaults.MAX_MEMORY_PERCENT,
+        disk_buffer_factor: float = defaults.DISK_BUFFER_FACTOR,
+        **kwargs
     ):
-        """Initialize encoding configuration.
-        
-        Args:
-            target_vmaf: Target VMAF score
-            preset: SVT-AV1 preset (0-13)
-            vmaf_sample_count: Number of VMAF samples
-            vmaf_sample_length: Length of each VMAF sample in seconds
-            svt_params: SVT-AV1 parameters
-            hw_accel_opts: Hardware acceleration options
-            working_dir: Override default working directory location
-            temp_dir: Override default temporary directory location
-        """
+        """Initialize configuration."""
         super().__init__(
             target_vmaf=target_vmaf,
             preset=preset,
@@ -122,7 +133,11 @@ class EncodingConfig(BaseModel):
             hw_accel_opts=hw_accel_opts,
             working_dir=working_dir,
             temp_dir=temp_dir,
-            **data
+            min_disk_gb=min_disk_gb,
+            max_cpu_percent=max_cpu_percent,
+            max_memory_percent=max_memory_percent,
+            disk_buffer_factor=disk_buffer_factor,
+            **kwargs
         )
         
         # Initialize paths

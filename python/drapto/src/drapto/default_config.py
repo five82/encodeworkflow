@@ -52,3 +52,9 @@ DISABLE_CROP = False
 
 # Chunked encoding settings
 ENABLE_CHUNKED_ENCODING = True
+
+# Resource monitoring settings
+MIN_DISK_GB = 50.0  # Minimum free disk space in GB
+MAX_CPU_PERCENT = 90.0  # Maximum CPU usage percentage
+MAX_MEMORY_PERCENT = 90.0  # Maximum memory usage percentage
+DISK_BUFFER_FACTOR = 1.5  # Buffer factor for disk space (input_size * factor)
