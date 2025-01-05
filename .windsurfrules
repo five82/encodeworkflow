@@ -8,6 +8,21 @@ The path selection is automatic based on Dolby Vision detection. The chunked enc
 
 Drapto is a rewrite in Python of the original encode bash scripts.
 
+## Project specific rules
+
+Replace ffmpeg and ffprobe calls with FFmpeg Python bindings when possible.
+We are refactoring. Do not change or remove application functionality unless requested or without approval. All application functionality must be preserved.
+Do not remove code that impacts application functionality without asking for approval first.
+If you spot potential application improvements, suggest them and ask for approval.
+Do not change existing default values without first asking for approval.
+If you spot errors, faulty logic, broken logic, or unexpected behavior in the existing Python code, ask for approval first before fixing.
+Stick to the structure and order of the Cascade Implementation Plan while refactoring. If changes to the plan are needed, suggest them and ask for approval first.
+Application terminal output must be clear, concise, easy to understand, and easy for the user to track encoding progress. Terminal output must be formatted correctly for readability.
+Application terminal output must track the progress of each task, including encoding, validation, and muxing.
+Show what ab-av1 or ffmpeg commands are being run in the terminal output so users can understand what is happening. These commands should be formatted correctly.
+Do not make application terminal output cluttered or overly verbose.
+Organize application output so users see relevent messages when the appropriate LOG_LEVEL is set.
+
 ## Project locations
 
 ### Reference encode bash scripts:
@@ -22,6 +37,9 @@ Drapto is a rewrite in Python of the original encode bash scripts.
 /encode_utilities.sh
 /encode_validation.sh
 /encode_video_functions.sh
+
+These are reference scripts only. Do not edit these files.
+Examine the encode bash scripts for guidance when making changes. Point out any code changes or requests that conflict with the bash scripts and ask for clarification and approval.
 
 ### Drapto Python code:
 
@@ -39,6 +57,8 @@ Drapto is a rewrite in Python of the original encode bash scripts.
 
 /python/drapto/src/drapto/docs/workflow/
 
+Look at the workflow documentation when making changes. Point out any code changes that conflict with the workflow and ask for clarification and approval.
+If you receive approval, make the changes and update the workflow documentation.
 
 ## AI Assistant Guidelines
 
@@ -89,3 +109,23 @@ Drapto is a rewrite in Python of the original encode bash scripts.
    - Document error cases
    - Include usage examples
    - Note any limitations
+
+## Rules
+
+Use proper Python coding style, code organization, and best practices.
+When making code changes, always state exactly what you are changing and why.
+Add meaningful comments to explain the purpose of the code.
+Add top level comments to explain the purpose of the file.
+Use type hints to document the expected types of inputs and outputs.
+Use assertions to validate assumptions and check for errors.
+Use try-except to handle exceptions and provide appropriate error messages.
+Use logging to track operations and errors.
+Use unit tests to validate components.
+
+## Troubleshooting Rules
+
+Use proper troubleshooting techniques to diagnose and resolve issues.
+Avoid repeat guesses. Enable debug to view output and narrow down the problem.
+Avoid circular troubleshooting. Track your attempts and progress to narrow down the problem.
+Admit when you do not know an anwser. Ask for help.
+State when an approach is not working and why. Suggest alternatives.
