@@ -6,7 +6,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, Protocol, List, Tuple
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from drapto.monitoring import ResourceMonitor
 
@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 
 class EncodingContext(BaseModel):
     """Context for encoding operation."""
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_default=True,
+        str_strip_whitespace=True,
+        validate_assignment=True
+    )
+    
     input_path: Path
     output_path: Path
     target_vmaf: float

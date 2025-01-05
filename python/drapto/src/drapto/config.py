@@ -8,13 +8,20 @@ from pathlib import Path
 from typing import Optional, Dict
 
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from . import default_config as defaults
 
 
 class EncodingConfig(BaseModel):
     """Configuration for video encoding."""
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_default=True,
+        str_strip_whitespace=True,
+        validate_assignment=True
+    )
     
     # Paths
     script_dir: Path = Field(
@@ -202,7 +209,3 @@ class EncodingConfig(BaseModel):
             return self.crf_hd
         else:
             return self.crf_uhd
-    
-    class Config:
-        """Pydantic config."""
-        arbitrary_types_allowed = True
