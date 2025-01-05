@@ -1,9 +1,10 @@
 """Factory for creating encoding path instances."""
 
 import logging
-from typing import Dict, Any, Optional, Type
+from typing import Dict, Type, Optional
 
-from .base import EncodingPath, BaseEncoder
+from .base import BaseEncoder
+from .dolby_vision import DolbyVisionEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,10 @@ class EncodingPathFactory:
         self._logger = logging.getLogger(__name__)
         self._paths: Dict[str, Type[BaseEncoder]] = {}
         
-    def register_path(self, name: str, path_class: Type[BaseEncoder]):
+        # Register default paths
+        self.register_path("dolby_vision", DolbyVisionEncoder)
+        
+    def register_path(self, name: str, path_class: Type[BaseEncoder]) -> None:
         """Register an encoding path.
         
         Args:
@@ -25,11 +29,7 @@ class EncodingPathFactory:
         self._paths[name] = path_class
         self._logger.debug(f"Registered encoding path: {name}")
         
-    def create_path(
-        self,
-        name: str,
-        config: Dict[str, Any]
-    ) -> Optional[BaseEncoder]:
+    def create_path(self, name: str, config: Dict[str, str]) -> Optional[BaseEncoder]:
         """Create an instance of an encoding path.
         
         Args:

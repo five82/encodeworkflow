@@ -164,7 +164,10 @@ class FeatureFlags:
     def __init__(self) -> None:
         self._flags = {
             "new_detection": False,
-            "new_encoding": False
+            "new_segmentation": False,
+            "new_encoding": False,
+            "new_audio": False,
+            "new_track_handling": False
         }
         self._logger = logging.getLogger(__name__)
         
@@ -211,25 +214,32 @@ The AI assistant will:
 
 ### Phase 1: Core Architecture
 
-1. **Base Classes and Interfaces**
+1. **Video Analysis Components**
+   - Create stream analysis utilities
+   - Add HDR detection
+   - Implement black bar detection
+   - Add quality settings selection
+   - Create hardware detection
+
+2. **Base Classes and Interfaces**
    - Create encoding base classes
    - Define common interfaces
    - Implement factory pattern
    - Add resource monitoring framework
 
-2. **Path-Specific Implementation**
-   - Implement Dolby Vision encoder
-   - Implement Chunked encoder
-   - Add path selection logic
-   - Create validation framework
+3. **Hardware Support**
+   - Add device detection
+   - Implement acceleration options
+   - Create fallback strategies
+   - Add performance monitoring
 
-3. **Resource Management**
+4. **Resource Management**
    - Add CPU/memory monitoring
    - Implement disk space tracking
    - Create cleanup strategies
    - Add resource optimization
 
-4. **Progress Reporting**
+5. **Progress Reporting**
    - Implement logging hierarchy
    - Add progress tracking
    - Create command formatting
@@ -237,19 +247,28 @@ The AI assistant will:
 
 ### Phase 2: Path Implementation
 
-1. **Dolby Vision Path**
+1. **Video Stream Analysis**
+   - Add resolution detection
+   - Implement HDR analysis
+   - Create color space validation
+   - Add stream size tracking
+   - Implement black bar detection
+
+2. **Dolby Vision Path**
    - Implement metadata handling
    - Add FFmpeg integration
    - Create validation checks
    - Add error recovery
+   - Handle HDR requirements
 
-2. **Chunked Encoding Path**
+3. **Chunked Encoding Path**
    - Implement segmentation
    - Add parallel processing
    - Create segment validation
    - Add error recovery
+   - Handle HDR segments
 
-3. **Common Components**
+4. **Common Components**
    - Implement audio processing
    - Add subtitle handling
    - Create muxing logic
