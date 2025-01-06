@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Protocol, List, Tuple
 from pydantic import BaseModel, ConfigDict
 
-from drapto.monitoring import ResourceMonitor
+from drapto.infrastructure.monitoring.resources import ResourceMonitor
 
 
 class EncodingContext(BaseModel):
