@@ -1,12 +1,13 @@
-"""Tests for Dolby Vision encoder."""
+"""Tests for the Dolby Vision encoding path."""
 
 import pytest
+import pytest_asyncio
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from drapto.core.base import EncodingContext
 from drapto.encoding.dolby_vision import DolbyVisionEncoder
-from drapto.encoding.base import EncodingContext
-from drapto.encoding.video_analysis import VideoStreamInfo
+from drapto.encoding.video_analysis import VideoAnalyzer, VideoStreamInfo
 
 @pytest.fixture
 def encoder():

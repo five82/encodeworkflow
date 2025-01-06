@@ -1,11 +1,14 @@
-"""Test configuration and fixtures."""
+"""Common test fixtures for encoding tests."""
 
 import pytest
 import pytest_asyncio
 import tempfile
 import shutil
 from pathlib import Path
-from drapto.encoding.base import BaseEncoder
+from typing import Dict, Any
+from unittest.mock import Mock
+
+from drapto.core.base import BaseEncoder
 
 @pytest_asyncio.fixture
 async def temp_dir():

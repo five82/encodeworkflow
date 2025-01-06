@@ -1,9 +1,11 @@
-"""Factory for creating encoding path instances."""
+"""Factory for creating encoding paths."""
 
 import logging
 from typing import Dict, Type, Optional
+from pathlib import Path
 
-from .base import BaseEncoder
+from drapto.core.base import BaseEncoder
+from .chunked import ChunkedEncoder
 from .dolby_vision import DolbyVisionEncoder
 
 logger = logging.getLogger(__name__)

@@ -1,14 +1,14 @@
-"""Tests for chunked encoder."""
-
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+"""Tests for the chunked encoding path."""
 
 import pytest
+import pytest_asyncio
+import tempfile
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+from drapto.core.base import EncodingContext
 from drapto.encoding.chunked import ChunkedEncoder
-from drapto.encoding.base import EncodingContext
+from drapto.encoding.video_analysis import VideoAnalyzer, VideoStreamInfo
 
 @pytest.fixture
 def config():
@@ -37,7 +37,7 @@ def context():
 
 @pytest.fixture
 def mock_stream_info():
-    return MagicMock(
+    return Mock(
         width=3840,
         height=2160,
         is_hdr=True,
@@ -145,21 +145,14 @@ async def test_encode_segments(encoder, context):
                 result = await encoder._encode_segments(input_dir, output_dir, context, 30, 'yuv420p10le')
                 assert result
                 
-                # Verify parallel command
-                parallel_call = None
-                for call in mock_exec.call_args_list:
-                    if 'parallel' in call[0]:
-                        parallel_call = call
-                        break
-                        
-                assert parallel_call is not None
-                cmd = parallel_call[0]
-                assert '--no-notice' in cmd
-                assert '--line-buffer' in cmd
-                assert '--halt' in cmd
-                assert 'soon,fail=1' in cmd
-                assert '--jobs' in cmd
-                assert '0' in cmd
+                # Verify parallel command was called correctly
+                assert mock_exec.call_count > 0
+                args = mock_exec.call_args[0]
+                
+                # Check key arguments
+                assert '/usr/bin/parallel' in args
+                assert '--will-cite' in args
+                assert str(input_dir / '*.mkv') in args
 
 @pytest.mark.asyncio
 async def test_encode_segments_no_parallel(encoder, context):

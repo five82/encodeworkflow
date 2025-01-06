@@ -3,12 +3,15 @@
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
-import shutil
+from typing import Dict, Any, List, Optional
 
-from .base import BaseEncoder, EncodingContext
+from pydantic import BaseModel
+
+from drapto.core.base import BaseEncoder, EncodingContext
 from .video_analysis import VideoAnalyzer, VideoStreamInfo
 
 class ChunkedEncoder(BaseEncoder):
@@ -73,7 +76,7 @@ class ChunkedEncoder(BaseEncoder):
                     context.crop_filter = crop_filter
                     
                 # Encode segments
-                if not await self._encode_segments(segments_dir, encoded_dir, context, crf, pix_fmt):
+                if not await self._encode_segments(segments_dir, encoded_dir, context, self._segment_length, pix_fmt):
                     return False
                     
                 # Concatenate segments
@@ -176,117 +179,56 @@ class ChunkedEncoder(BaseEncoder):
             self._logger.error(f"Segment validation failed: {e}")
             return False
             
-    async def _encode_segments(self, input_dir: Path, output_dir: Path, 
-                             context: EncodingContext, crf: int, pix_fmt: str) -> bool:
-        """Encode video segments in parallel using GNU Parallel.
+    async def _encode_segments(
+        self,
+        input_dir: Path,
+        output_dir: Path,
+        context: EncodingContext,
+        segment_duration: int,
+        pixel_format: str
+    ) -> bool:
+        """Encode segments in parallel using GNU Parallel.
         
         Args:
             input_dir: Directory containing input segments
-            output_dir: Directory for encoded segments
+            output_dir: Directory for output segments
             context: Encoding context
-            crf: CRF value for encoding
-            pix_fmt: Output pixel format
+            segment_duration: Duration of each segment in seconds
+            pixel_format: Input pixel format
             
         Returns:
-            True if all segments encoded successfully
+            True if encoding succeeded, False otherwise
         """
         try:
-            # Check if GNU Parallel is installed
-            if not shutil.which('parallel'):
-                self._logger.error("GNU Parallel not found. Please install it first.")
+            parallel_path = shutil.which('parallel')
+            if not parallel_path:
+                self._logger.error("GNU Parallel not found")
                 return False
                 
-            # Create command file
-            cmd_file = output_dir / 'encode_commands.txt'
-            script_file = output_dir / 'encode_segment.sh'
-            
-            # Create encoding script
-            script_content = f"""#!/bin/bash
-input_segment="$1"
-output_segment="$2"
-crop_filter="$3"
-
-# First attempt with default settings
-if ab-av1 auto-encode \\
-    --input "$input_segment" \\
-    --output "$output_segment" \\
-    --encoder libsvtav1 \\
-    --min-vmaf {self._vmaf_target} \\
-    --preset {context.preset} \\
-    --svt "{context.svt_params}" \\
-    --keyint 10s \\
-    --samples {self._vmaf_samples} \\
-    --sample-duration {self._vmaf_duration} \\
-    --vmaf "n_subsample=8:pool=harmonic_mean" \\
-    ${{crop_filter:+--vfilter "$crop_filter"}} \\
-    --quiet; then
-    exit 0
-fi
-
-# Second attempt with more samples
-if ab-av1 auto-encode \\
-    --input "$input_segment" \\
-    --output "$output_segment" \\
-    --encoder libsvtav1 \\
-    --min-vmaf {self._vmaf_target} \\
-    --preset {context.preset} \\
-    --svt "{context.svt_params}" \\
-    --keyint 10s \\
-    --samples 6 \\
-    --sample-duration 2s \\
-    --vmaf "n_subsample=8:pool=harmonic_mean" \\
-    ${{crop_filter:+--vfilter "$crop_filter"}} \\
-    --quiet; then
-    exit 0
-fi
-
-# Final attempt with lower VMAF target
-if ab-av1 auto-encode \\
-    --input "$input_segment" \\
-    --output "$output_segment" \\
-    --encoder libsvtav1 \\
-    --min-vmaf $((${self._vmaf_target} - 2)) \\
-    --preset {context.preset} \\
-    --svt "{context.svt_params}" \\
-    --keyint 10s \\
-    --samples 6 \\
-    --sample-duration 2s \\
-    --vmaf "n_subsample=8:pool=harmonic_mean" \\
-    ${{crop_filter:+--vfilter "$crop_filter"}} \\
-    --quiet; then
-    exit 0
-fi
-
-echo "Failed to encode segment after all attempts: $(basename "$input_segment")" >&2
-exit 1
-"""
-            
-            # Write script file
-            script_file.write_text(script_content)
-            script_file.chmod(0o755)
-            
-            # Build command list
-            with open(cmd_file, 'w') as f:
-                for segment in sorted(input_dir.glob('*.mkv')):
-                    output_segment = output_dir / segment.name
-                    if output_segment.exists() and output_segment.stat().st_size > 0:
-                        self._logger.info(f"Segment already encoded: {segment.name}")
-                        continue
-                    
-                    cmd = f"{script_file} '{segment}' '{output_segment}' '{context.crop_filter or ''}'"
-                    f.write(f"{cmd}\n")
-                    
-            # Run GNU Parallel
+            # Build parallel command
             cmd = [
-                'parallel',
-                '--no-notice',
-                '--line-buffer',
-                '--halt', 'soon,fail=1',
-                '--jobs', '0',
-                ':::', str(cmd_file)
+                str(parallel_path),
+                "--will-cite",  # Suppress citation notice
+                "-j", str(os.cpu_count()),
+                "ab-av1",
+                "--input", "{}",
+                "--output", str(output_dir / "{/.}.mkv"),
+                "--vmaf-target", str(context.target_vmaf),
+                "--preset", str(context.preset),
+                "--svt-params", context.svt_params,
+                "--pixel-format", pixel_format,
+                "--segment-duration", str(segment_duration)
             ]
             
-            self._logger.info(f"Encoding segments in parallel: {' '.join(cmd)}")
+            if context.crop_filter:
+                cmd.extend(["--crop", context.crop_filter])
+                
+            # Add input file pattern
+            cmd.append(str(input_dir / "*.mkv"))
+            
+            self._logger.info("Starting parallel encode with %d threads", os.cpu_count())
+            self._logger.debug("Parallel command: %s", " ".join(cmd))
+            
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -295,13 +237,17 @@ exit 1
             stdout, stderr = await proc.communicate()
             
             if proc.returncode != 0:
-                self._logger.error(f"Parallel encoding failed: {stderr.decode()}")
+                self._logger.error(
+                    "Parallel encoding failed with code %d: %s",
+                    proc.returncode,
+                    stderr.decode('utf-8')
+                )
                 return False
                 
             return True
             
         except Exception as e:
-            self._logger.error(f"Parallel encoding failed: {e}")
+            self._logger.error("Parallel encoding failed: %s", e)
             return False
             
     async def _concatenate_segments(self, segments_dir: Path, output_path: Path) -> bool:

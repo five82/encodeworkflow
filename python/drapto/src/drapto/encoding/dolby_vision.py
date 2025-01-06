@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from .base import BaseEncoder, EncodingContext
+from drapto.core.base import BaseEncoder, EncodingContext
 from .video_analysis import VideoAnalyzer, VideoStreamInfo
 
 class DolbyVisionEncoder(BaseEncoder):

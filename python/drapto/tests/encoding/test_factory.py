@@ -1,11 +1,12 @@
-"""Tests for encoding path factory."""
+"""Tests for the encoding path factory."""
 
 import pytest
 import pytest_asyncio
-from unittest.mock import Mock
+from pathlib import Path
+from typing import Dict, Any
 
+from drapto.core.base import BaseEncoder
 from drapto.encoding.factory import EncodingPathFactory, factory
-from drapto.encoding.base import BaseEncoder
 
 @pytest.fixture
 def mock_encoder_class():

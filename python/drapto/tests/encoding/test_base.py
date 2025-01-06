@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
+import subprocess
 
 from drapto.encoding import BaseEncoder, EncodingContext
 
@@ -68,9 +69,9 @@ class TestBaseEncoder:
     def mock_which(self):
         """Mock shutil.which to make dependencies available."""
         with patch('shutil.which') as mock:
-            mock.return_value = True
+            mock.return_value = '/usr/bin/ffprobe'  # Return actual path instead of bool
             yield mock
-    
+            
     @pytest.fixture
     def mock_run_command(self):
         """Mock _run_command to return test data."""
@@ -114,12 +115,14 @@ class TestBaseEncoder:
         with open(output_path, "wb") as f:
             f.write(b"dummy content")
             
-        # Mock ffprobe responses
+        # Mock ffprobe responses in correct order
         mock_run_command.side_effect = [
-            'av1',  # video codec
-            'opus\nopus',  # audio codecs
-            '60.0',  # input duration
-            '60.0'   # output duration
+            'av1',      # input video codec
+            'av1',      # output video codec
+            'opus\nopus',  # input audio codecs
+            'opus\nopus',  # output audio codecs
+            '60.0',     # input duration
+            '60.0'      # output duration
         ]
             
         context = EncodingContext(
@@ -138,18 +141,20 @@ class TestBaseEncoder:
         """Test output validation with empty file."""
         # Create empty output file
         output_path.touch()
-            
-        context = EncodingContext(
-            input_path=input_path,
-            output_path=output_path,
-            target_vmaf=93.0,
-            preset=6,
-            svt_params="film-grain=0:film-grain-denoise=0"
-        )
         
-        result = await encoder._validate_output(context)
-        assert result is False
-    
+        # Mock _run_command to simulate empty file
+        with patch.object(encoder, '_run_command', side_effect=subprocess.CalledProcessError(1, [])):
+            context = EncodingContext(
+                input_path=input_path,
+                output_path=output_path,
+                target_vmaf=93.0,
+                preset=6,
+                svt_params="film-grain=0:film-grain-denoise=0"
+            )
+            
+            result = await encoder._validate_output(context)
+            assert result is False
+            
     @pytest.mark.asyncio
     async def test_validate_input_low_resources(self, encoder, input_path, output_path, mock_which):
         """Test input validation with low resources."""
@@ -230,12 +235,14 @@ class TestBaseEncoder:
         with open(output_path, "wb") as f:
             f.write(b"dummy content")
             
-        # Mock ffprobe responses
+        # Mock ffprobe responses in correct order
         mock_run_command.side_effect = [
-            'h264',  # wrong video codec
-            'opus\nopus',
-            '60.0',
-            '60.0'
+            'av1',      # input video codec
+            'h264',     # output video codec (wrong)
+            'opus\nopus',  # input audio codecs
+            'opus\nopus',  # output audio codecs
+            '60.0',     # input duration
+            '60.0'      # output duration
         ]
             
         context = EncodingContext(
@@ -248,7 +255,7 @@ class TestBaseEncoder:
         
         result = await encoder._validate_output(context)
         assert result is False
-    
+            
     @pytest.mark.asyncio
     async def test_validate_output_wrong_audio_codec(self, encoder, input_path, output_path, mock_which, mock_run_command):
         """Test output validation with wrong audio codec."""
@@ -256,12 +263,14 @@ class TestBaseEncoder:
         with open(output_path, "wb") as f:
             f.write(b"dummy content")
             
-        # Mock ffprobe responses
+        # Mock ffprobe responses in correct order
         mock_run_command.side_effect = [
-            'av1',
-            'aac\naac',  # wrong audio codec
-            '60.0',
-            '60.0'
+            'av1',      # input video codec
+            'av1',      # output video codec
+            'opus\nopus',  # input audio codecs
+            'aac\naac',    # output audio codecs (wrong)
+            '60.0',     # input duration
+            '60.0'      # output duration
         ]
             
         context = EncodingContext(
@@ -274,7 +283,7 @@ class TestBaseEncoder:
         
         result = await encoder._validate_output(context)
         assert result is False
-    
+            
     @pytest.mark.asyncio
     async def test_validate_output_duration_mismatch(self, encoder, input_path, output_path, mock_which, mock_run_command):
         """Test output validation with mismatched durations."""
@@ -282,12 +291,14 @@ class TestBaseEncoder:
         with open(output_path, "wb") as f:
             f.write(b"dummy content")
             
-        # Mock ffprobe responses
+        # Mock ffprobe responses in correct order
         mock_run_command.side_effect = [
-            'av1',
-            'opus\nopus',
-            '60.0',  # input duration
-            '65.0'   # output duration (too different)
+            'av1',      # input video codec
+            'av1',      # output video codec
+            'opus\nopus',  # input audio codecs
+            'opus\nopus',  # output audio codecs
+            '60.0',     # input duration
+            '65.0'      # output duration (too different)
         ]
             
         context = EncodingContext(
