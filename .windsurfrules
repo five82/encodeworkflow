@@ -12,6 +12,8 @@ Drapto is a rewrite in Python of the original encode bash scripts.
 
 Replace ffmpeg and ffprobe calls with FFmpeg Python bindings when possible.
 We are refactoring. Do not change or remove application functionality unless requested or without approval. All application functionality must be preserved.
+When refactoring, search for and reuse existing project code whenever possible. Reuse is always preferred over rewriting.
+When refactoring, clean up unused, obsolete, and redundant code. When code is migrated, ask for approval and remove the old and redundant code.
 Do not remove code that impacts application functionality without asking for approval first.
 If you spot potential application improvements, suggest them and ask for approval.
 Do not change existing default values without first asking for approval.
