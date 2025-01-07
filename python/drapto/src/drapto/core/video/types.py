@@ -45,11 +45,13 @@ class HDRInfo:
     Attributes:
         is_hdr: Whether the stream is HDR
         is_dolby_vision: Whether the stream has Dolby Vision metadata
-        hdr_format: HDR format if detected (HDR10, HDR10+, HLG)
+        hdr_format: HDR format if detected (HDR10, HDR10+, HLG, Dolby Vision)
+        black_level: Black level threshold for HDR content
     """
     is_hdr: bool = False
     is_dolby_vision: bool = False
     hdr_format: Optional[str] = None
+    black_level: Optional[int] = None
 
 
 @dataclass
@@ -69,6 +71,7 @@ class VideoStreamInfo:
         is_dolby_vision: Whether the stream has Dolby Vision metadata
         crop_info: Optional black bar detection info
         quality_settings: Optional encoding quality settings
+        hdr_info: Optional HDR detection info
     """
     width: int
     height: int
@@ -82,3 +85,4 @@ class VideoStreamInfo:
     is_dolby_vision: bool = False
     crop_info: Optional[CropInfo] = None
     quality_settings: Optional[QualitySettings] = None
+    hdr_info: Optional[HDRInfo] = None
