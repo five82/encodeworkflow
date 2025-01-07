@@ -22,6 +22,7 @@ Application terminal output must track the progress of each task, including enco
 Show what ab-av1 or ffmpeg commands are being run in the terminal output so users can understand what is happening. These commands should be formatted correctly.
 Do not make application terminal output cluttered or overly verbose.
 Organize application output so users see relevent messages when the appropriate LOG_LEVEL is set.
+Application functionality should match the reference bash scripts and workflow documentation. Do not deviate without approval.
 
 ## Project locations
 
