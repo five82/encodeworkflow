@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from drapto.core.base import EncodingContext
 from drapto.encoding.chunked import ChunkedEncoder
-from drapto.encoding.video_analysis import VideoAnalyzer, VideoStreamInfo
+from drapto.core.video.analysis import VideoAnalyzer, VideoStreamInfo
 
 @pytest.fixture
 def config():

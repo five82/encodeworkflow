@@ -158,7 +158,7 @@ class TestBaseEncoder:
     @pytest.mark.asyncio
     async def test_validate_input_low_resources(self, encoder, input_path, output_path, mock_which):
         """Test input validation with low resources."""
-        with patch('drapto.monitoring.base.psutil') as mock_psutil:
+        with patch('drapto.infrastructure.monitoring.resources.psutil') as mock_psutil:
             # Mock very low disk space
             disk_usage = Mock()
             disk_usage.free = 1 * 1024 * 1024 * 1024  # 1GB
