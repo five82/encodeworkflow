@@ -12,7 +12,8 @@ from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 
 from drapto.core.base import BaseEncoder, EncodingContext
-from .video_analysis import VideoAnalyzer, VideoStreamInfo
+from drapto.core.video.types import VideoStreamInfo
+from drapto.core.video.analysis import VideoAnalyzer
 
 class ChunkedEncoder(BaseEncoder):
     """Encoder that splits video into chunks for parallel processing."""

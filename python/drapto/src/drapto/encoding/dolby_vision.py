@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from drapto.core.base import BaseEncoder, EncodingContext
-from .video_analysis import VideoAnalyzer, VideoStreamInfo
+from drapto.core.video.types import VideoStreamInfo
+from drapto.core.video.analysis import VideoAnalyzer
+
 
 class DolbyVisionEncoder(BaseEncoder):
     """Encoder for Dolby Vision content using FFmpeg."""
@@ -41,15 +43,15 @@ class DolbyVisionEncoder(BaseEncoder):
                 return False
                 
             # Get quality settings
-            crf, pix_fmt = self._analyzer.get_quality_settings(stream_info)
+            quality_settings = self._analyzer.get_quality_settings(stream_info)
             
             # Detect black bars
-            crop_filter = self._analyzer.detect_black_bars(context.input_path, stream_info)
+            crop_filter = self._analyzer.detect_black_bars(context.input_path)
             if crop_filter:
                 context.crop_filter = crop_filter
                 
             # Build and run FFmpeg command
-            cmd = self._build_ffmpeg_command(context, stream_info, crf, pix_fmt)
+            cmd = self._build_ffmpeg_command(context, stream_info, quality_settings)
             if not await self._run_command(cmd):
                 return False
                 
@@ -65,14 +67,13 @@ class DolbyVisionEncoder(BaseEncoder):
             
     def _build_ffmpeg_command(self, context: EncodingContext, 
                             stream_info: VideoStreamInfo,
-                            crf: int, pix_fmt: str) -> List[str]:
+                            quality_settings) -> List[str]:
         """Build FFmpeg command for encoding.
         
         Args:
             context: Encoding context
             stream_info: Video stream information
-            crf: CRF value
-            pix_fmt: Output pixel format
+            quality_settings: Quality settings for encoding
             
         Returns:
             List of command arguments
@@ -98,17 +99,34 @@ class DolbyVisionEncoder(BaseEncoder):
         if filters:
             cmd.extend(['-vf', ','.join(filters)])
             
-        # Video encoding options
+        # Video codec settings
         cmd.extend([
             '-c:v', 'libsvtav1',
             '-preset', str(context.preset),
-            '-crf', str(crf),
-            '-pix_fmt', pix_fmt,
-            '-svtav1-params', context.svt_params
+            '-crf', str(quality_settings.crf)
+        ])
+        
+        # HDR settings
+        if stream_info.is_hdr:
+            cmd.extend([
+                '-pix_fmt', stream_info.pixel_format,
+                '-color_primaries', stream_info.color_primaries,
+                '-color_trc', stream_info.color_transfer,
+                '-colorspace', stream_info.color_space
+            ])
+            
+        # SVT-AV1 params
+        if context.svt_params:
+            cmd.extend(['-svtav1-params', context.svt_params])
+            
+        # Audio and subtitle settings
+        cmd.extend([
+            '-c:a', 'copy',
+            '-c:s', 'copy'
         ])
         
         # Output
-        cmd.extend([str(context.output_path)])
+        cmd.append(str(context.output_path))
         
         return cmd
 
