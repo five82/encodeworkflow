@@ -11,6 +11,9 @@ from .types import VideoStreamInfo, HDRInfo
 def detect_dolby_vision(input_path: Path) -> bool:
     """Detect Dolby Vision using mediainfo.
     
+    For UHD Blu-ray rips from MakeMKV, Dolby Vision will be consistently marked
+    in the mediainfo output.
+    
     Args:
         input_path: Path to input video file
         
@@ -21,7 +24,12 @@ def detect_dolby_vision(input_path: Path) -> bool:
     try:
         cmd = ['mediainfo', str(input_path)]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        return 'Dolby Vision' in result.stdout
+        
+        is_dv = 'Dolby Vision' in result.stdout
+        if is_dv:
+            logger.info("Dolby Vision detected")
+        return is_dv
+        
     except Exception as e:
         logger.error("Dolby Vision detection failed: %s", e)
         return False
@@ -30,15 +38,22 @@ def detect_dolby_vision(input_path: Path) -> bool:
 def detect_black_level(input_path: Path, is_hdr: bool) -> int:
     """Detect black level by sampling frames.
     
+    For SDR content, uses standard black level of 16.
+    For HDR content:
+    1. Samples frames to find typical black level
+    2. Adjusts threshold based on measured black level
+    3. Clamps to valid range [16, 256]
+    
     Args:
         input_path: Path to input video file
         is_hdr: Whether the content is HDR
         
     Returns:
-        Detected black level threshold
+        Black level threshold for the content
     """
     logger = logging.getLogger(__name__)
     
+    # Use standard black level for SDR
     if not is_hdr:
         return 16
         
@@ -52,28 +67,35 @@ def detect_black_level(input_path: Path, is_hdr: bool) -> int:
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         
-        # Parse black levels
+        # Default to SDR black level on error
+        if result.returncode != 0:
+            logger.error("Black level detection failed")
+            return 16
+            
+        # Parse black levels from output
         black_levels = []
         for line in result.stderr.splitlines():
             if 'black_level' in line:
                 try:
-                    level = float(line.split(':')[1])
+                    level = float(line.split(':')[1].strip())
                     black_levels.append(level)
                 except (IndexError, ValueError):
                     continue
                     
-        if black_levels:
-            # Calculate average and adjust by 1.5
-            avg_level = sum(black_levels) / len(black_levels)
-            threshold = int(avg_level * 1.5)
-            # Clamp between 16 and 256
-            return max(16, min(256, threshold))
+        if not black_levels:
+            logger.warning("No black levels found, using default")
+            return 16
             
+        # Calculate average and adjust
+        avg_level = sum(black_levels) / len(black_levels)
+        threshold = int(avg_level * 1.5)  # Multiply by 1.5 like bash script
+        
+        # Clamp to valid range
+        return max(16, min(256, threshold))
+        
     except Exception as e:
         logger.error("Black level detection failed: %s", e)
-        
-    # Default HDR threshold if detection fails
-    return 128
+        return 16
 
 
 def detect_hdr(stream_info: VideoStreamInfo, input_path: Optional[Path] = None) -> HDRInfo:
@@ -129,11 +151,13 @@ def detect_hdr(stream_info: VideoStreamInfo, input_path: Optional[Path] = None) 
             result.hdr_format = 'HDR'
             
     # Check Dolby Vision if path provided
-    if input_path and detect_dolby_vision(input_path):
-        result.is_hdr = True
-        result.is_dolby_vision = True
-        result.hdr_format = 'Dolby Vision'
-        
+    if input_path:
+        is_dv = detect_dolby_vision(input_path)
+        if is_dv:
+            result.is_hdr = True
+            result.is_dolby_vision = True
+            result.hdr_format = 'Dolby Vision'
+            
     # Log detection results
     if result.is_hdr:
         logger.info("HDR content detected: %s", result.hdr_format)
