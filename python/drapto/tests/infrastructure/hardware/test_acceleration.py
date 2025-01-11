@@ -32,9 +32,20 @@ class TestHardwareAcceleration:
         mock_system.return_value = "Darwin"
         mock_machine.return_value = "arm64"
         
-        # Mock FFmpeg hwaccels output
-        mock_run.return_value.stdout = "Hardware acceleration methods: videotoolbox"
-        mock_run.return_value.returncode = 0
+        # Mock FFmpeg hwaccels and decoder validation
+        def mock_command(*args, **kwargs):
+            if "-hwaccels" in args[0]:
+                result = MagicMock()
+                result.stdout = "videotoolbox\nvdpau\ncuda"
+                result.returncode = 0
+                return result
+            elif "testsrc" in " ".join(args[0]):
+                result = MagicMock()
+                result.returncode = 0
+                return result
+            return MagicMock()
+
+        mock_run.side_effect = mock_command
         
         manager = HardwareManager()
         accel = manager.detect_acceleration()
