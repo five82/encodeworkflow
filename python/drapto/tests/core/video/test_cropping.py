@@ -429,3 +429,203 @@ def test_logging_behavior(mock_error, mock_warning, mock_info, mock_debug, tmp_p
     mock_error.assert_called_with(
         f'Input file does not exist: {non_existent}'
     )
+
+
+@patch('ffmpeg.output')
+def test_detect_black_bars_short_video(mock_output, tmp_path):
+    """Test black bar detection for very short videos."""
+    config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
+    input_path = tmp_path / 'input.mkv'
+    input_path.touch()
+
+    info = VideoStreamInfo(
+        width=1920,
+        height=1080,
+        is_hdr=False,
+        frame_rate=24.0
+    )
+
+    # Mock the ffmpeg command chain
+    mock_run = mock_output.return_value.overwrite_output.return_value.run
+    mock_run.return_value = (
+        b'',  # stdout
+        b'[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:140 y2:940 w:1920 h:800 x:0 y:140 pts:1 t:0.04 crop=1920:800:0:140\n'
+    )
+
+    with patch('ffmpeg.probe', return_value={
+        'streams': [{
+            'codec_type': 'video',
+            'width': 1920,
+            'height': 1080,
+            'r_frame_rate': '24/1'
+        }],
+        'format': {
+            'duration': '120.000000'  # 2 minutes
+        }
+    }):
+        crop_info = detect_black_bars(input_path, config, info)
+        assert crop_info is not None
+        assert crop_info.enabled
+        assert crop_info.width == 1920
+        assert crop_info.height == 800
+
+
+@patch('ffmpeg.output')
+def test_detect_black_bars_mixed_samples(mock_output, tmp_path):
+    """Test black bar detection with inconsistent crop samples."""
+    config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
+    input_path = tmp_path / 'input.mkv'
+    input_path.touch()
+
+    info = VideoStreamInfo(
+        width=1920,
+        height=1080,
+        is_hdr=False,
+        frame_rate=24.0
+    )
+
+    # Mock the ffmpeg command chain with different crop values
+    mock_run = mock_output.return_value.overwrite_output.return_value.run
+    mock_run.return_value = (
+        b'',  # stdout
+        b'[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:140 y2:940 w:1920 h:800 x:0 y:140 pts:1 t:0.04 crop=1920:800:0:140\n'
+        b'[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:130 y2:950 w:1920 h:820 x:0 y:130 pts:2 t:0.08 crop=1920:820:0:130\n'
+        b'[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:140 y2:940 w:1920 h:800 x:0 y:140 pts:3 t:0.12 crop=1920:800:0:140\n'
+    )
+
+    with patch('ffmpeg.probe', return_value={
+        'streams': [{
+            'codec_type': 'video',
+            'width': 1920,
+            'height': 1080,
+            'r_frame_rate': '24/1'
+        }],
+        'format': {
+            'duration': '3600.000000'
+        }
+    }):
+        crop_info = detect_black_bars(input_path, config, info)
+        assert crop_info is not None
+        assert crop_info.enabled
+        # Should use most common values
+        assert crop_info.width == 1920
+        assert crop_info.height == 800
+        assert crop_info.x == 0
+        assert crop_info.y == 140
+
+
+@patch('ffmpeg.output')
+def test_detect_black_bars_near_original(mock_output, tmp_path):
+    """Test black bar detection with crop values very close to original dimensions."""
+    config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
+    input_path = tmp_path / 'input.mkv'
+    input_path.touch()
+
+    info = VideoStreamInfo(
+        width=1920,
+        height=1080,
+        is_hdr=False,
+        frame_rate=24.0
+    )
+
+    # Mock the ffmpeg command chain with crop values close to original
+    mock_run = mock_output.return_value.overwrite_output.return_value.run
+    mock_run.return_value = (
+        b'',  # stdout
+        b'[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:2 y2:1074 w:1920 h:1072 x:0 y:2 pts:1 t:0.04 crop=1920:1072:0:2\n'
+    )
+
+    with patch('ffmpeg.probe', return_value={
+        'streams': [{
+            'codec_type': 'video',
+            'width': 1920,
+            'height': 1080,
+            'r_frame_rate': '24/1'
+        }],
+        'format': {
+            'duration': '3600.000000'
+        }
+    }):
+        crop_info = detect_black_bars(input_path, config, info)
+        assert crop_info is not None
+        # Should not crop when difference is less than MIN_CROP_PIXELS (10)
+        assert not crop_info.enabled
+
+
+@patch('ffmpeg.output')
+def test_detect_black_bars_permission_error(mock_output, tmp_path):
+    """Test black bar detection with file permission error."""
+    config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
+    input_path = tmp_path / 'input.mkv'
+    input_path.touch()
+    
+    # Mock permission error
+    mock_run = mock_output.return_value.overwrite_output.return_value.run
+    mock_run.side_effect = ffmpeg.Error('Permission denied', stdout=b'', stderr=b'Permission denied')
+
+    with patch('ffmpeg.probe', side_effect=ffmpeg.Error('Permission denied', stdout=b'', stderr=b'Permission denied')):
+        crop_info = detect_black_bars(input_path, config)
+        assert crop_info is None
+
+
+@patch('ffmpeg.output')
+def test_detect_black_bars_memory_error(mock_output, tmp_path):
+    """Test black bar detection with memory allocation error."""
+    config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
+    input_path = tmp_path / 'input.mkv'
+    input_path.touch()
+
+    # Mock memory error
+    mock_run = mock_output.return_value.overwrite_output.return_value.run
+    mock_run.side_effect = ffmpeg.Error('Cannot allocate memory', stdout=b'', stderr=b'Cannot allocate memory')
+
+    with patch('ffmpeg.probe', return_value={
+        'streams': [{
+            'codec_type': 'video',
+            'width': 1920,
+            'height': 1080,
+            'r_frame_rate': '24/1'
+        }],
+        'format': {
+            'duration': '3600.000000'
+        }
+    }):
+        crop_info = detect_black_bars(input_path, config)
+        assert crop_info is None
+
+
+def test_detect_black_bars_invalid_stream_info(tmp_path):
+    """Test black bar detection with invalid video stream info."""
+    config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
+    input_path = tmp_path / 'input.mkv'
+    input_path.touch()
+
+    # Test with invalid width
+    info = VideoStreamInfo(
+        width=-1920,  # Invalid width
+        height=1080,
+        is_hdr=False,
+        frame_rate=24.0
+    )
+    crop_info = detect_black_bars(input_path, config, info)
+    assert crop_info is None
+
+    # Test with invalid height
+    info = VideoStreamInfo(
+        width=1920,
+        height=-1080,  # Invalid height
+        is_hdr=False,
+        frame_rate=24.0
+    )
+    crop_info = detect_black_bars(input_path, config, info)
+    assert crop_info is None
+
+    # Test with invalid frame rate
+    info = VideoStreamInfo(
+        width=1920,
+        height=1080,
+        is_hdr=False,
+        frame_rate=-24.0  # Invalid frame rate
+    )
+    crop_info = detect_black_bars(input_path, config, info)
+    assert crop_info is None

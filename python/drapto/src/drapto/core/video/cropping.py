@@ -165,8 +165,10 @@ def detect_black_bars(input_path: Path, config: dict,
         logger.info(f"Most common crop values: width={w} height={h} x={x} y={y}")
 
         # Validate crop values
-        if w == info.width and h == info.height:
-            logger.info("No cropping needed - video has correct dimensions")
+        MIN_CROP_PIXELS = 10  # Don't crop if difference is less than this
+        height_diff = info.height - h
+        if w == info.width and (height_diff == 0 or height_diff < MIN_CROP_PIXELS):
+            logger.info("No significant cropping needed - video has correct dimensions or crop too small")
             return CropInfo(enabled=False)
 
         # Create crop info
