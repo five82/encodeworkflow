@@ -1,8 +1,43 @@
-"""Common video analysis types."""
+"""Type definitions for video encoding."""
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+
+
+@dataclass
+class QualitySettings:
+    """Encoding quality settings.
+    
+    Attributes:
+        crf: Constant Rate Factor (quality-based VBR)
+        preset: Encoding preset (slower = better quality)
+        max_bitrate: Maximum bitrate in bits/s
+        bufsize: VBV buffer size in bits
+        qmin: Minimum quantizer scale
+        qmax: Maximum quantizer scale
+    """
+    crf: int
+    preset: str
+    max_bitrate: int
+    bufsize: int
+    qmin: Optional[int] = None
+    qmax: Optional[int] = None
+
+
+@dataclass
+class HDRInfo:
+    """HDR detection results.
+    
+    Attributes:
+        is_hdr: Whether the stream is HDR
+        is_dolby_vision: Whether the stream has Dolby Vision metadata
+        hdr_format: HDR format if detected (HDR10, HDR10+, HLG, Dolby Vision)
+        black_level: Black level threshold for HDR content
+    """
+    is_hdr: bool = False
+    is_dolby_vision: bool = False
+    hdr_format: Optional[str] = None
+    black_level: Optional[int] = None
 
 
 @dataclass
@@ -24,31 +59,6 @@ class CropInfo:
 
 
 @dataclass
-class QualitySettings:
-    """Encoding quality settings.
-    
-    Attributes:
-        crf: Constant Rate Factor value
-        preset: Encoding preset (e.g. medium, slow)
-        max_bitrate: Maximum bitrate in bits per second
-        bufsize: Buffer size in bits
-    """
-    crf: int
-    preset: str = 'medium'
-    max_bitrate: Optional[int] = None
-    bufsize: Optional[int] = None
-
-
-@dataclass
-class HDRInfo:
-    """HDR information for video."""
-    format: str
-    is_hdr: bool = False
-    is_dolby_vision: bool = False
-    black_level: Optional[int] = None
-
-
-@dataclass
 class VideoStreamInfo:
     """Information about a video stream.
     
@@ -66,7 +76,6 @@ class VideoStreamInfo:
         crop_info: Optional black bar detection info
         quality_settings: Optional encoding quality settings
         hdr_info: Optional HDR detection info
-        input_path: Optional input path
     """
     width: int
     height: int
@@ -81,4 +90,3 @@ class VideoStreamInfo:
     crop_info: Optional[CropInfo] = None
     quality_settings: Optional[QualitySettings] = None
     hdr_info: Optional[HDRInfo] = None
-    input_path: Optional[Path] = None

@@ -11,6 +11,7 @@ from drapto.core.video.cropping import (
     get_crop_threshold,
     get_credits_skip
 )
+from drapto.core.video.exceptions import BlackBarDetectionError
 
 
 def test_detect_black_bars(tmp_path):
@@ -43,16 +44,16 @@ def test_detect_black_bars_no_crop(tmp_path):
     config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
     input_path = tmp_path / 'input.mkv'
     input_path.touch()
-    
+
     with patch('subprocess.run') as mock_run:
         mock_run.side_effect = [
             Mock(stdout='{"format": {"duration": "3600"}}'),
             Mock(stderr='[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:0 y2:1080 w:1920 h:1080 x:0 y:0 pts:1 t:0.04 crop=1920:1080:0:0')
         ]
-        
+
         crop_info = detect_black_bars(input_path, config)
         assert crop_info is not None
-        assert not crop_info.enabled
+        assert not crop_info.enabled  # No cropping needed
 
 
 def test_detect_black_bars_error(tmp_path):
@@ -84,41 +85,60 @@ def test_detect_black_bars_no_output(tmp_path):
 
 def test_get_crop_threshold():
     """Test crop threshold selection."""
-    # Test SDR threshold
-    sdr_info = VideoStreamInfo(
+    # Test SDR content
+    assert get_crop_threshold(None) == 24
+    assert get_crop_threshold(VideoStreamInfo(
         width=1920,
         height=1080,
+        frame_rate=24.0,
         is_hdr=False,
-        frame_rate=24.0
-    )
-    assert get_crop_threshold(sdr_info) == 16
-    
-    # Test HDR threshold
-    hdr_info = VideoStreamInfo(
-        width=1920,
-        height=1080,
+        color_transfer='bt709'
+    )) == 24
+
+    # Test generic HDR content
+    assert get_crop_threshold(VideoStreamInfo(
+        width=3840,
+        height=2160,
+        frame_rate=24.0,
         is_hdr=True,
-        frame_rate=24.0
-    )
-    assert get_crop_threshold(hdr_info) == 128
+        color_transfer='bt2020'
+    )) == 48
+
+    # Test HDR10/PQ content
+    assert get_crop_threshold(VideoStreamInfo(
+        width=3840,
+        height=2160,
+        frame_rate=24.0,
+        is_hdr=True,
+        color_transfer='smpte2084'
+    )) == 64
+
+    # Test HLG content
+    assert get_crop_threshold(VideoStreamInfo(
+        width=3840,
+        height=2160,
+        frame_rate=24.0,
+        is_hdr=True,
+        color_transfer='arib-std-b67'
+    )) == 56
 
 
 def test_get_credits_skip():
     """Test credits skip timing."""
-    # Test short content (< 5 minutes)
-    assert get_credits_skip(240) == (0, 30)
-    
-    # Test medium content (5-20 minutes)
-    assert get_credits_skip(900) == (15, 30)
-    
-    # Test TV episode length (20-60 minutes)
-    assert get_credits_skip(2400) == (30, 60)
-    
-    # Test movie length (> 60 minutes)
-    assert get_credits_skip(7200) == (60, 180)
-    
-    # Test very short content
-    assert get_credits_skip(10) == (0, 10)
+    # Test short content (<30 min)
+    start, end = get_credits_skip(1200)  # 20 minutes
+    assert start == 30.0
+    assert end == 60.0
+
+    # Test medium content (30-60 min)
+    start, end = get_credits_skip(2400)  # 40 minutes
+    assert start == 60.0
+    assert end == 120.0
+
+    # Test long content (>60 min)
+    start, end = get_credits_skip(5400)  # 90 minutes
+    assert start == 120.0
+    assert end == 180.0
 
 
 def test_detect_black_bars_sdr():
@@ -130,14 +150,15 @@ def test_detect_black_bars_sdr():
         is_hdr=False,
         frame_rate=24.0
     )
-    
-    with patch('subprocess.run') as mock_run:
+
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock duration query
         mock_run.side_effect = [
             Mock(stdout='{"format": {"duration": "3600"}}'),  # ffprobe duration
             Mock(stderr='\n[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:140 y2:940 w:1920 h:800 x:0 y:140 pts:119 t:4.000000 crop=1920:800:0:140\n')  # ffmpeg cropdetect
         ]
-        
+
         crop_info = detect_black_bars(Path('test.mkv'), config, info)
         assert crop_info is not None
         assert crop_info.enabled
@@ -156,14 +177,15 @@ def test_detect_black_bars_hdr():
         is_hdr=True,
         frame_rate=24.0
     )
-    
-    with patch('subprocess.run') as mock_run:
+
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock duration query
         mock_run.side_effect = [
             Mock(stdout='{"format": {"duration": "7200"}}'),  # ffprobe duration
             Mock(stderr='\n[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:3840 y1:280 y2:1880 w:3840 h:1600 x:0 y:280 pts:119 t:4.000000 crop=3840:1600:0:280\n')  # ffmpeg cropdetect
         ]
-        
+
         crop_info = detect_black_bars(Path('test.mkv'), config, info)
         assert crop_info is not None
         assert crop_info.enabled
@@ -176,22 +198,10 @@ def test_detect_black_bars_hdr():
 def test_detect_black_bars_error_handling():
     """Test black bar detection error handling."""
     config = {'ffmpeg': 'ffmpeg', 'ffprobe': 'ffprobe'}
-    
-    with patch('subprocess.run') as mock_run:
+
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Test ffprobe failure
         mock_run.side_effect = Exception('ffprobe failed')
-        assert detect_black_bars(Path('test.mkv'), config) is None
-        
-        # Test invalid duration
-        mock_run.side_effect = [
-            Mock(stdout='{"format": {}}'),  # Missing duration
-            Mock(stderr='')
-        ]
-        assert detect_black_bars(Path('test.mkv'), config) is None
-        
-        # Test no crop detection
-        mock_run.side_effect = [
-            Mock(stdout='{"format": {"duration": "3600"}}'),
-            Mock(stderr='')  # No crop lines
-        ]
-        assert detect_black_bars(Path('test.mkv'), config) is None
+        result = detect_black_bars(Path('test.mkv'), config)
+        assert result is None

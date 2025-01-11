@@ -55,8 +55,8 @@ class ResourceMonitor:
         
         # Get disk usage for path or current directory
         disk_path = path if path else Path.cwd()
-        disk = psutil.disk_usage(disk_path)
-        disk_free_gb = disk.free / (1024 * 1024 * 1024)  # Convert to GB
+        disk = psutil.disk_usage(str(disk_path))
+        disk_free_gb = disk.free / (1024 * 1024 * 1024)  # Convert bytes to GB
         disk_percent = disk.percent
         
         # Get I/O counters

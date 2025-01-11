@@ -27,7 +27,8 @@ def analyzer(config):
 
 def test_analyze_stream_sdr(analyzer):
     """Test stream analysis with SDR content."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock FFprobe output
         mock_run.return_value = Mock(
             stdout=json.dumps({
@@ -58,7 +59,8 @@ def test_analyze_stream_sdr(analyzer):
 
 def test_analyze_stream_hdr10(analyzer):
     """Test stream analysis with HDR10 content."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock FFprobe output
         mock_run.return_value = Mock(
             stdout=json.dumps({
@@ -89,7 +91,8 @@ def test_analyze_stream_hdr10(analyzer):
 
 def test_analyze_stream_dolby_vision(analyzer):
     """Test stream analysis with Dolby Vision content."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock FFprobe output
         mock_run.return_value = Mock(
             stdout=json.dumps({
@@ -120,7 +123,8 @@ def test_analyze_stream_dolby_vision(analyzer):
 
 def test_analyze_stream_with_crop(analyzer):
     """Test stream analysis with crop detection."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock FFprobe output for stream info
         stream_info_mock = Mock(
             stdout=json.dumps({
@@ -169,7 +173,8 @@ def test_analyze_stream_with_crop(analyzer):
 
 def test_analyze_stream_error_handling(analyzer):
     """Test stream analysis error handling."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Test missing streams
         mock_run.return_value = Mock(stdout='{"streams": []}')
         assert analyzer.analyze_stream(Path('test.mkv')) is None
@@ -187,7 +192,8 @@ def test_analyze_stream_error(analyzer):
     """Test analyzing stream with FFmpeg error."""
     input_path = Path('test.mp4')
     
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         mock_run.side_effect = subprocess.CalledProcessError(1, [])
         assert analyzer.analyze_stream(input_path) is None
 
@@ -196,6 +202,7 @@ def test_analyze_stream_invalid_json(analyzer):
     """Test analyzing stream with invalid JSON."""
     input_path = Path('test.mp4')
     
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         mock_run.return_value = Mock(stdout='invalid json')
         assert analyzer.analyze_stream(input_path) is None

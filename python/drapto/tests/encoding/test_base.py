@@ -117,12 +117,12 @@ class TestBaseEncoder:
             
         # Mock ffprobe responses in correct order
         mock_run_command.side_effect = [
-            'av1',      # input video codec
-            'av1',      # output video codec
-            'opus\nopus',  # input audio codecs
-            'opus\nopus',  # output audio codecs
-            '60.0',     # input duration
-            '60.0'      # output duration
+            (True, 'av1'),      # input video codec
+            (True, 'av1'),      # output video codec
+            (True, 'opus\nopus'),  # input audio codecs
+            (True, 'opus\nopus'),  # output audio codecs
+            (True, '60.0'),     # input duration
+            (True, '60.0')      # output duration
         ]
             
         context = EncodingContext(
@@ -158,13 +158,16 @@ class TestBaseEncoder:
     @pytest.mark.asyncio
     async def test_validate_input_low_resources(self, encoder, input_path, output_path, mock_which):
         """Test input validation with low resources."""
-        with patch('drapto.infrastructure.monitoring.resources.psutil') as mock_psutil:
-            # Mock very low disk space
-            disk_usage = Mock()
-            disk_usage.free = 1 * 1024 * 1024 * 1024  # 1GB
-            disk_usage.total = 500 * 1024 * 1024 * 1024  # 500GB
-            mock_psutil.disk_usage.return_value = disk_usage
-            
+        with patch('drapto.utils.validation.validate_input_file', return_value=input_path), \
+             patch.object(encoder, 'get_resources') as mock_get_resources:
+            # Mock low resources
+            mock_get_resources.return_value = {
+                'disk_free_gb': 1.0,  # 1GB
+                'disk_percent': 95.0,  # Very high disk usage
+                'cpu_percent': 90.0,   # High CPU usage
+                'memory_percent': 95.0  # High memory usage
+            }
+
             context = EncodingContext(
                 input_path=input_path,
                 output_path=output_path,
@@ -172,7 +175,7 @@ class TestBaseEncoder:
                 preset=6,
                 svt_params="film-grain=0:film-grain-denoise=0"
             )
-            
+
             result = await encoder._validate_input(context)
             assert result is False
     

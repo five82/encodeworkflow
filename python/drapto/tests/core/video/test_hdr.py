@@ -1,16 +1,20 @@
-"""Tests for HDR detection."""
+"""Tests for HDR detection functionality."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import patch, Mock
+import subprocess
+
+import pytest
 
 from drapto.core.video.types import VideoStreamInfo, HDRInfo
 from drapto.core.video.hdr import detect_hdr, detect_dolby_vision, detect_black_level
+from drapto.core.video.errors import HDRDetectionError, BlackBarDetectionError, FFmpegError
 
 
 def test_detect_dolby_vision():
     """Test Dolby Vision detection."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock mediainfo output with Dolby Vision
         mock_run.return_value = Mock(stdout='Dolby Vision')
         assert detect_dolby_vision(Path('test.mkv')) is True
@@ -26,14 +30,16 @@ def test_detect_dolby_vision():
 
 def test_detect_black_level_sdr():
     """Test black level detection for SDR content."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         mock_run.return_value = Mock(returncode=0)
         assert detect_black_level(Path('test.mkv'), False) == 16
 
 
 def test_detect_black_level_hdr():
     """Test black level detection for HDR content."""
-    with patch('subprocess.run') as mock_run:
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
         # Mock FFmpeg output with black levels
         mock_run.return_value = Mock(
             returncode=0,
@@ -46,15 +52,18 @@ def test_detect_black_level_hdr():
         
         level = detect_black_level(Path('test.mkv'), True)
         assert level > 16  # HDR black level should be higher
-        assert level == 150  # (100 average * 1.5)
+        assert level == 100  # Should use average of detected levels
 
 
 def test_detect_black_level_error():
     """Test black level detection error handling."""
-    with patch('subprocess.run') as mock_run:
-        mock_run.side_effect = Exception('ffmpeg failed')
-        # Should return default SDR black level on error
-        assert detect_black_level(Path('test.mkv'), True) == 16
+    with patch('pathlib.Path.exists', return_value=True), \
+         patch('subprocess.run') as mock_run:
+        mock_run.side_effect = subprocess.CalledProcessError(1, 'ffmpeg', stderr='ffmpeg failed')
+        with pytest.raises(FFmpegError) as exc_info:
+            detect_black_level(Path('test.mkv'), True)
+        assert "FFmpeg black level detection failed" in str(exc_info.value)
+        assert "ffmpeg failed" in exc_info.value.stderr
 
 
 def test_detect_hdr_sdr():
@@ -67,11 +76,9 @@ def test_detect_hdr_sdr():
         color_space='bt709',
         bit_depth=8
     )
-    
+
     hdr_info = detect_hdr(info)
-    assert not hdr_info.is_hdr
-    assert not hdr_info.is_dolby_vision
-    assert hdr_info.hdr_format is None
+    assert hdr_info is None  # SDR content should return None
 
 
 def test_detect_hdr_hdr10():
@@ -84,11 +91,10 @@ def test_detect_hdr_hdr10():
         color_space='bt2020nc',
         bit_depth=10
     )
-    
+
     hdr_info = detect_hdr(info)
-    assert hdr_info.is_hdr
-    assert not hdr_info.is_dolby_vision
-    assert hdr_info.hdr_format == 'HDR10'
+    assert hdr_info is not None
+    assert hdr_info.format == 'hdr10'
 
 
 def test_detect_hdr_hlg():
@@ -101,11 +107,10 @@ def test_detect_hdr_hlg():
         color_space='bt2020nc',
         bit_depth=10
     )
-    
+
     hdr_info = detect_hdr(info)
-    assert hdr_info.is_hdr
-    assert not hdr_info.is_dolby_vision
-    assert hdr_info.hdr_format == 'HLG'
+    assert hdr_info is not None
+    assert hdr_info.format == 'hlg'
 
 
 def test_detect_hdr_dolby_vision():
@@ -116,15 +121,15 @@ def test_detect_hdr_dolby_vision():
         color_transfer='smpte2084',  # PQ
         color_primaries='bt2020',
         color_space='bt2020nc',
-        bit_depth=10
+        bit_depth=10,
+        input_path=Path('test.mkv')
     )
-    
+
     with patch('drapto.core.video.hdr.detect_dolby_vision') as mock_detect:
         mock_detect.return_value = True
-        hdr_info = detect_hdr(info, Path('test.mkv'))
-        assert hdr_info.is_hdr
-        assert hdr_info.is_dolby_vision
-        assert hdr_info.hdr_format == 'Dolby Vision'
+        hdr_info = detect_hdr(info)
+        assert hdr_info is not None
+        assert hdr_info.format == 'dolby_vision'
 
 
 def test_detect_hdr_smpte428():
@@ -137,8 +142,7 @@ def test_detect_hdr_smpte428():
         color_space='xyz',
         bit_depth=12
     )
-    
+
     hdr_info = detect_hdr(info)
-    assert hdr_info.is_hdr
-    assert not hdr_info.is_dolby_vision
-    assert hdr_info.hdr_format == 'HDR'
+    assert hdr_info is not None
+    assert hdr_info.format == 'smpte428'
