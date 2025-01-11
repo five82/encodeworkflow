@@ -132,7 +132,9 @@ def test_analyze_stream_dolby_vision(analyzer):
 def test_analyze_stream_with_crop(analyzer):
     """Test stream analysis with crop detection."""
     with patch('pathlib.Path.exists', return_value=True), \
-         patch('subprocess.run') as mock_run:
+         patch('subprocess.run') as mock_run, \
+         patch('ffmpeg.probe') as mock_probe, \
+         patch('ffmpeg.output') as mock_output:
         # Mock FFprobe output for stream info
         stream_info_mock = Mock(
             stdout=json.dumps({
@@ -146,7 +148,7 @@ def test_analyze_stream_with_crop(analyzer):
             stderr='',
             returncode=0
         )
-        
+
         # Mock FFprobe duration query
         duration_mock = Mock(
             stdout=json.dumps({
@@ -157,16 +159,29 @@ def test_analyze_stream_with_crop(analyzer):
             stderr='',
             returncode=0
         )
-        
+
         # Mock FFmpeg crop detection
-        crop_mock = Mock(
-            stdout='',
-            stderr='''[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:140 y2:940 w:1920 h:800 x:0 y:140 pts:119 t:4.000000 crop=1920:800:0:140''',
-            returncode=0
+        mock_run.side_effect = [stream_info_mock, duration_mock]
+
+        # Mock ffmpeg.probe calls in detect_black_bars
+        mock_probe.return_value = {
+            'streams': [{
+                'codec_type': 'video',
+                'width': 1920,
+                'height': 1080,
+                'r_frame_rate': '24/1'
+            }],
+            'format': {
+                'duration': '3600.000000'
+            }
+        }
+
+        # Mock ffmpeg.output for crop detection
+        mock_output.return_value.overwrite_output.return_value.run.return_value = (
+            b'',  # stdout
+            b'[Parsed_cropdetect_0 @ 0x7f8c] x1:0 x2:1920 y1:140 y2:940 w:1920 h:800 x:0 y:140 pts:119 t:4.000000 crop=1920:800:0:140'
         )
-        
-        mock_run.side_effect = [stream_info_mock, duration_mock, crop_mock]
-        
+
         info = analyzer.analyze_stream(Path('test.mkv'))
         assert info is not None
         assert info.crop_info is not None
