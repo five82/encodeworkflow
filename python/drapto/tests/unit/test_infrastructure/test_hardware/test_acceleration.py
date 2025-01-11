@@ -47,9 +47,20 @@ class TestHardwareManager:
         mock_system.return_value = "Darwin"
         mock_machine.return_value = "arm64"
         
-        # Mock FFmpeg hwaccels output
-        mock_run.return_value.stdout = "videotoolbox\nvdpau\ncuda"
-        mock_run.return_value.returncode = 0
+        # Mock FFmpeg hwaccels and decoder validation
+        def mock_command(*args, **kwargs):
+            if "-hwaccels" in args[0]:
+                result = MagicMock()
+                result.stdout = "videotoolbox\nvdpau\ncuda"
+                result.returncode = 0
+                return result
+            elif "testsrc" in " ".join(args[0]):
+                result = MagicMock()
+                result.returncode = 0
+                return result
+            return MagicMock()
+        
+        mock_run.side_effect = mock_command
         
         accel = hardware_manager.detect_acceleration()
         assert accel == HardwareAccel.VIDEOTOOLBOX
@@ -68,13 +79,9 @@ class TestHardwareManager:
         # Mock VAAPI device exists
         mock_exists.return_value = True
         
-        # Mock FFmpeg and vainfo output
+        # Mock FFmpeg, vainfo, and decoder validation
         def mock_command(*args, **kwargs):
-            if "-version" in args[0]:
-                result = MagicMock()
-                result.returncode = 0
-                return result
-            elif "-hwaccels" in args[0]:
+            if "-hwaccels" in args[0]:
                 result = MagicMock()
                 result.stdout = "vaapi\nvdpau\ncuda"
                 result.returncode = 0
@@ -82,6 +89,10 @@ class TestHardwareManager:
             elif "vainfo" in args[0]:
                 result = MagicMock()
                 result.stdout = "VA-API version: 1.16.0\nDriver version: 22.3.3\nSupported profile and entrypoints:\nVAEntrypointVLD"
+                result.returncode = 0
+                return result
+            elif "testsrc" in " ".join(args[0]):
+                result = MagicMock()
                 result.returncode = 0
                 return result
             return MagicMock()
@@ -94,6 +105,32 @@ class TestHardwareManager:
             "-hwaccel", "vaapi",
             "-hwaccel_device", "/dev/dri/renderD128"
         ]
+
+    @patch("platform.system")
+    @patch("platform.machine")
+    @patch("subprocess.run")
+    def test_detect_acceleration_decoder_failure(self, mock_run, mock_machine, mock_system, hardware_manager):
+        """Test handling decoder validation failure."""
+        # Mock macOS Apple Silicon
+        mock_system.return_value = "Darwin"
+        mock_machine.return_value = "arm64"
+        
+        # Mock FFmpeg hwaccels but fail decoder validation
+        def mock_command(*args, **kwargs):
+            if "-hwaccels" in args[0]:
+                result = MagicMock()
+                result.stdout = "videotoolbox\nvdpau\ncuda"
+                result.returncode = 0
+                return result
+            elif "testsrc" in " ".join(args[0]):
+                raise subprocess.SubprocessError()
+            return MagicMock()
+        
+        mock_run.side_effect = mock_command
+        
+        accel = hardware_manager.detect_acceleration()
+        assert accel == HardwareAccel.NONE
+        assert hardware_manager.get_ffmpeg_options() == []
 
     @patch("platform.system")
     @patch("platform.machine")

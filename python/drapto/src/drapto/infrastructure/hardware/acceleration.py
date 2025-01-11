@@ -10,17 +10,20 @@ from typing import Dict, List, Optional, Tuple
 import ffmpeg
 from pydantic import BaseModel
 
+
 class HardwareAccel(Enum):
     """Supported hardware acceleration types."""
     NONE = auto()
     VIDEOTOOLBOX = auto()
     VAAPI = auto()
 
+
 class HardwareConfig(BaseModel):
     """Hardware acceleration configuration."""
     enable_hw_accel: bool = True
     force_software: bool = False
     vaapi_device: Optional[str] = "/dev/dri/renderD128"
+
 
 class HardwareManager:
     """Manages hardware acceleration detection and configuration.
@@ -78,30 +81,23 @@ class HardwareManager:
             self._logger.info("Hardware acceleration disabled by configuration")
             self._detected_accel = HardwareAccel.NONE
             return self._detected_accel
-
-        # Get platform info
-        platform_info = self._get_platform_info()
-        system = platform_info.get("system", "").lower()
-        machine = platform_info.get("machine", "").lower()
-
-        try:
-            # Check for VideoToolbox on macOS Apple Silicon
-            if system == "darwin" and machine in ["arm64", "aarch64"]:
-                if self._check_videotoolbox():
-                    self._detected_accel = HardwareAccel.VIDEOTOOLBOX
-                    return self._detected_accel
-
-            # Check for VAAPI on Linux
-            elif system == "linux":
-                if self._check_vaapi():
-                    self._detected_accel = HardwareAccel.VAAPI
-                    return self._detected_accel
-
-        except Exception as e:
-            self._logger.warning("Hardware acceleration detection failed: %s", str(e))
-
-        # Fallback to software encoding
-        self._logger.info("No supported hardware acceleration found, using software encoding")
+        
+        # Check platform-specific hardware acceleration
+        system = platform.system()
+        machine = platform.machine()
+        
+        if system == "Darwin" and machine in ("arm64", "aarch64"):
+            if self._check_videotoolbox():
+                self._detected_accel = HardwareAccel.VIDEOTOOLBOX
+                return self._detected_accel
+                
+        elif system == "Linux":
+            if self._check_vaapi():
+                self._detected_accel = HardwareAccel.VAAPI
+                return self._detected_accel
+        
+        # No supported hardware acceleration found
+        self._logger.info("No supported hardware acceleration found")
         self._detected_accel = HardwareAccel.NONE
         return self._detected_accel
 
@@ -116,85 +112,134 @@ class HardwareManager:
         if accel == HardwareAccel.VIDEOTOOLBOX:
             return ["-hwaccel", "videotoolbox"]
         elif accel == HardwareAccel.VAAPI:
-            device = self._config.vaapi_device
-            return ["-hwaccel", "vaapi", "-hwaccel_device", device]
-        
-        return []  # No hardware acceleration options
+            return [
+                "-hwaccel", "vaapi",
+                "-hwaccel_device", self._config.vaapi_device
+            ]
+        return []
 
     def _check_videotoolbox(self) -> bool:
         """Check for VideoToolbox support.
         
         Returns:
-            True if VideoToolbox is supported
+            True if VideoToolbox is supported and working
         """
         try:
+            # Check if VideoToolbox is available
             result = subprocess.run(
                 [str(self._ffmpeg_path), "-hide_banner", "-hwaccels"],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=5
             )
-            if "videotoolbox" in result.stdout:
-                self._logger.info("Found VideoToolbox hardware acceleration")
-                return True
+            if "videotoolbox" not in result.stdout:
+                self._logger.info("VideoToolbox not available")
+                return False
+                
+            # Validate decoder works
+            self._logger.debug("Testing VideoToolbox decoder")
+            return self._validate_decoder("videotoolbox")
+            
         except subprocess.SubprocessError as e:
             self._logger.warning("VideoToolbox check failed: %s", str(e))
-        return False
+            return False
 
     def _check_vaapi(self) -> bool:
         """Check for VAAPI support.
         
         Returns:
-            True if VAAPI is supported
+            True if VAAPI is supported and working
         """
-        # Check if VAAPI device exists
-        device = Path(self._config.vaapi_device)
-        if not device.exists():
-            self._logger.warning("VAAPI device not found: %s", device)
-            return False
-
         try:
-            # Check if FFmpeg supports VAAPI
+            # Check if VAAPI device exists
+            if not Path(self._config.vaapi_device).exists():
+                self._logger.info("VAAPI device not found: %s", 
+                              self._config.vaapi_device)
+                return False
+                
+            # Check if VAAPI is available in FFmpeg
             result = subprocess.run(
                 [str(self._ffmpeg_path), "-hide_banner", "-hwaccels"],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=5
             )
             if "vaapi" not in result.stdout:
-                self._logger.warning("FFmpeg does not support VAAPI")
+                self._logger.info("VAAPI not available in FFmpeg")
                 return False
-
-            # Validate VAAPI device
+                
+            # Check vainfo
             result = subprocess.run(
-                ["vainfo", "--display", "drm", "--device", str(device)],
+                ["vainfo"],
                 capture_output=True,
-                text=True
+                text=True,
+                check=True,
+                timeout=5
             )
-            if result.returncode == 0 and "VAEntrypointVLD" in result.stdout:
-                self._logger.info("Found VAAPI hardware acceleration")
-                return True
-            else:
-                self._logger.warning("VAAPI device validation failed")
+            if "VAEntrypointVLD" not in result.stdout:
+                self._logger.info("VAAPI decoder not supported")
                 return False
-
-        except FileNotFoundError:
-            self._logger.warning("vainfo not found, cannot validate VAAPI device")
+                
+            # Validate decoder works
+            self._logger.debug("Testing VAAPI decoder")
+            return self._validate_decoder(
+                "vaapi",
+                "-hwaccel_device", self._config.vaapi_device
+            )
+            
         except subprocess.SubprocessError as e:
             self._logger.warning("VAAPI check failed: %s", str(e))
-        return False
+            return False
+        except FileNotFoundError:
+            self._logger.warning("vainfo not found")
+            return False
 
-    def _get_platform_info(self) -> Dict[str, str]:
-        """Get platform information.
+    def _validate_decoder(self, hwaccel: str, *options: str) -> bool:
+        """Test if hardware decoder works.
         
+        Args:
+            hwaccel: Hardware acceleration type (e.g. videotoolbox, vaapi)
+            options: Additional FFmpeg options
+            
         Returns:
-            Dictionary with platform information
+            True if decoder works
         """
-        return {
-            "system": platform.system(),
-            "machine": platform.machine(),
-            "version": platform.version()
-        }
+        try:
+            # Generate a test pattern and try to decode it
+            cmd = [
+                str(self._ffmpeg_path),
+                "-f", "lavfi",
+                "-i", "testsrc=duration=1:size=1280x720:rate=30",
+                "-c:v", "libx264",
+                "-f", "mp4",
+                "-y",
+                "-",  # Output to pipe
+                "|",  # Pipe to next command
+                str(self._ffmpeg_path),
+                "-hwaccel", hwaccel,
+                *options,
+                "-i", "pipe:",  # Read from pipe
+                "-f", "null",
+                "-"
+            ]
+            
+            # Run as shell command to support piping
+            subprocess.run(
+                " ".join(cmd),
+                shell=True,
+                capture_output=True,
+                check=True,
+                timeout=10
+            )
+            
+            self._logger.info("Validated hardware decoder: %s", hwaccel)
+            return True
+            
+        except subprocess.SubprocessError as e:
+            self._logger.warning("Hardware decoder validation failed: %s", str(e))
+            return False
 
     def _is_in_path(self, cmd: str) -> bool:
         """Check if a command is available in system PATH.
@@ -206,9 +251,20 @@ class HardwareManager:
             True if command is in PATH
         """
         try:
-            subprocess.run([cmd, "-version"], 
-                         capture_output=True, 
-                         check=True)
+            subprocess.run([cmd, "-version"], capture_output=True, check=True)
             return True
         except (subprocess.SubprocessError, FileNotFoundError):
             return False
+
+    def _get_platform_info(self) -> Dict[str, str]:
+        """Get platform information.
+        
+        Returns:
+            Dictionary with platform information
+        """
+        return {
+            'platform_system': platform.system(),
+            'platform_machine': platform.machine(),
+            'platform_processor': platform.processor(),
+            'platform_release': platform.release()
+        }
