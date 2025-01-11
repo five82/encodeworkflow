@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 
 @dataclass
@@ -67,6 +67,7 @@ class VideoStreamInfo:
         quality_settings: Optional encoding quality settings
         hdr_info: Optional HDR detection info
         input_path: Optional input path
+        side_data_list: Optional list of side data dictionaries from FFprobe
     """
     width: int
     height: int
@@ -82,3 +83,4 @@ class VideoStreamInfo:
     quality_settings: Optional[QualitySettings] = None
     hdr_info: Optional[HDRInfo] = None
     input_path: Optional[Path] = None
+    side_data_list: Optional[List[Dict[str, Any]]] = None

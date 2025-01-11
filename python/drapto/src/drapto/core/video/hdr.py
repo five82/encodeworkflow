@@ -1,54 +1,131 @@
 """HDR detection utilities."""
 
+import json
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Optional, Set, Any, List
 
 from .types import VideoStreamInfo, HDRInfo
-from .errors import HDRDetectionError, MediaInfoError, FFmpegError
+from .errors import HDRDetectionError
 
+# Valid HDR format combinations
+HDR_FORMATS = {
+    'HDR10': {
+        'color_transfer': {'smpte2084'},  # PQ
+        'color_primaries': {'bt2020'},
+        'color_space': {'bt2020nc', 'bt2020c'},
+        'bit_depth': {10}
+    },
+    'Dolby Vision': {
+        'color_transfer': {'smpte2084'},  # Must be PQ
+        'color_primaries': {'bt2020'},
+        'color_space': {'bt2020nc', 'bt2020c'},
+        'bit_depth': {10}  # Always encode in 10-bit
+    }
+}
 
-def detect_dolby_vision(input_path: Path) -> bool:
-    """Detect Dolby Vision using mediainfo.
+# Black level constants for DVD/Blu-ray sources
+MIN_BLACK_LEVEL = 16
+MAX_BLACK_LEVEL = 256
+DEFAULT_SDR_BLACK_LEVEL = 16  # Standard for DVD/Blu-ray
+DEFAULT_HDR_BLACK_LEVEL = 64  # Higher default for HDR content
 
-    For UHD Blu-ray rips from MakeMKV, Dolby Vision will be consistently marked
-    in the mediainfo output.
+def detect_hdr(stream_info: VideoStreamInfo) -> Optional[HDRInfo]:
+    """Detect HDR format from stream info.
+
+    Supports HDR10 and Dolby Vision from DVD, Blu-ray, and UHD Blu-ray sources.
+    All content will be encoded in 10-bit with SVT-AV1.
 
     Args:
-        input_path: Path to input video file
+        stream_info: Video stream information
 
     Returns:
-        True if Dolby Vision metadata detected, False otherwise
+        HDRInfo if HDR format detected, None if SDR
+
+    Raises:
+        HDRDetectionError: If stream properties are invalid or inconsistent
     """
-    logger = logging.getLogger(__name__)
+    if not stream_info:
+        raise HDRDetectionError("No stream info provided")
 
-    if not input_path.exists():
-        logger.warning("Input file does not exist: %s", input_path)
-        return False
+    # Normalize color properties to lowercase
+    color_transfer = stream_info.color_transfer.lower() if stream_info.color_transfer else ''
+    color_primaries = stream_info.color_primaries.lower() if stream_info.color_primaries else ''
+    color_space = stream_info.color_space.lower() if stream_info.color_space else ''
+    bit_depth = stream_info.bit_depth
 
-    try:
-        cmd = ['mediainfo', str(input_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    # Check for Dolby Vision profile in side_data_list or is_dolby_vision flag
+    side_data_list = getattr(stream_info, 'side_data_list', [])
+    has_dv_profile = any('dv_profile' in data for data in side_data_list) if side_data_list else False
+    
+    # First check for Dolby Vision since it's most specific
+    if has_dv_profile or stream_info.is_dolby_vision:
+        # Validate Dolby Vision color properties
+        if not _validate_color_properties('Dolby Vision', color_transfer, color_primaries, color_space, bit_depth):
+            raise HDRDetectionError(
+                "Invalid color properties for Dolby Vision content. "
+                f"Expected: {HDR_FORMATS['Dolby Vision']}, "
+                f"Got: transfer={color_transfer}, primaries={color_primaries}, "
+                f"space={color_space}, bit_depth={bit_depth}")
+        
+        # Detect black level for HDR content
+        black_level = detect_black_level(stream_info.input_path, True)
+        
+        return HDRInfo(
+            format='dolby_vision',
+            is_hdr=True,
+            is_dolby_vision=True,
+            black_level=black_level
+        )
 
-        is_dv = 'Dolby Vision' in result.stdout
-        if is_dv:
-            logger.info("Dolby Vision detected")
-        return is_dv
+    # Check for HDR10
+    if _validate_color_properties('HDR10', color_transfer, color_primaries, color_space, bit_depth):
+        black_level = detect_black_level(stream_info.input_path, True)
+        return HDRInfo(
+            format='hdr10',
+            is_hdr=True,
+            is_dolby_vision=False,
+            black_level=black_level
+        )
 
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.warning("MediaInfo command failed: %s", e)
-        return False
-    except Exception as e:
-        logger.warning("Unexpected error in Dolby Vision detection: %s", e)
-        return False
+    # Content is SDR if no HDR format detected
+    return None
 
+def _validate_color_properties(
+    hdr_format: str,
+    color_transfer: str,
+    color_primaries: str,
+    color_space: str,
+    bit_depth: int
+) -> bool:
+    """Validate color properties match HDR format requirements.
+
+    Args:
+        hdr_format: HDR format to validate against
+        color_transfer: Color transfer characteristic
+        color_primaries: Color primaries
+        color_space: Color space
+        bit_depth: Bit depth
+
+    Returns:
+        True if properties are valid for format
+    """
+    format_reqs = HDR_FORMATS[hdr_format]
+
+    # All properties must be present and match format requirements
+    return (
+        color_transfer in format_reqs['color_transfer'] and
+        color_primaries in format_reqs['color_primaries'] and
+        color_space in format_reqs['color_space'] and
+        bit_depth in format_reqs['bit_depth']
+    )
 
 def detect_black_level(input_path: Path, is_hdr: bool) -> int:
     """Detect black level by sampling frames.
 
-    For SDR content, uses standard black level of 16.
-    For HDR content:
+    For SDR content from DVD/Blu-ray, uses standard black level of 16.
+    For HDR content from UHD Blu-ray:
     1. Samples frames to find typical black level
     2. Uses average of detected black levels
     3. Clamps to valid range [16, 256]
@@ -67,77 +144,43 @@ def detect_black_level(input_path: Path, is_hdr: bool) -> int:
     if not input_path.exists():
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
 
+    # Use default values if not HDR (DVD/Blu-ray)
     if not is_hdr:
-        return 16
+        return DEFAULT_SDR_BLACK_LEVEL
 
-    cmd = [
-        'ffmpeg', '-i', str(input_path),
-        '-vf', 'blackdetect',
-        '-f', 'null', '-'
-    ]
     try:
+        # Sample frames to detect black level
+        cmd = [
+            'ffmpeg',
+            '-i', str(input_path),
+            '-vf', 'blackdetect=d=0:pix_th=0.00',
+            '-f', 'null',
+            '-'
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
-        # Extract black levels from output
+        # Parse black frame detection output
         black_levels = []
-        for line in result.stderr.splitlines():
+        for line in result.stderr.split('\n'):
             if 'black_level' in line:
                 try:
-                    level = int(line.split(':')[1])
+                    level = int(line.split('black_level:')[1].split()[0])
                     black_levels.append(level)
-                except (ValueError, IndexError):
+                except (IndexError, ValueError):
                     continue
 
-        if not black_levels:
-            return 16  # Default to SDR black level if no levels detected
+        # Calculate average black level
+        if black_levels:
+            avg_level = sum(black_levels) / len(black_levels)
+            # Clamp to valid range for UHD Blu-ray
+            black_level = max(MIN_BLACK_LEVEL, min(int(avg_level), MAX_BLACK_LEVEL))
+        else:
+            # Use default HDR black level if detection fails
+            black_level = DEFAULT_HDR_BLACK_LEVEL
 
-        # Use average of detected levels
-        avg_level = sum(black_levels) // len(black_levels)
-        
-        # Clamp to valid range
-        return max(16, min(avg_level, 256))
+        return black_level
 
     except subprocess.CalledProcessError as e:
-        raise FFmpegError(
-            "FFmpeg black level detection failed",
-            cmd=' '.join(cmd),
-            stderr=e.stderr
-        ) from e
+        raise HDRDetectionError(f"Black level detection failed: {e.stderr}")
     except Exception as e:
-        raise HDRDetectionError(f"Black level detection failed: {e}") from e
-
-
-def detect_hdr(stream_info: VideoStreamInfo) -> Optional[HDRInfo]:
-    """Detect HDR format from stream info.
-
-    Args:
-        stream_info: Video stream information
-
-    Returns:
-        HDRInfo if HDR format detected, None if SDR
-    """
-    if not stream_info:
-        return None
-
-    # Check for Dolby Vision first if input path is available
-    if stream_info.input_path and detect_dolby_vision(stream_info.input_path):
-        return HDRInfo(format='dolby_vision')
-
-    # Check color space attributes
-    transfer = stream_info.color_transfer.lower()
-    primaries = stream_info.color_primaries.lower()
-    space = stream_info.color_space.lower()
-
-    # HDR10
-    if transfer == 'smpte2084' and primaries == 'bt2020':
-        return HDRInfo(format='hdr10')
-
-    # HLG
-    if transfer == 'arib-std-b67' or transfer == 'hlg':
-        return HDRInfo(format='hlg')
-
-    # SMPTE ST 428
-    if transfer == 'smpte428_1' or transfer == 'smpte428':
-        return HDRInfo(format='smpte428')
-
-    return None
+        raise HDRDetectionError(f"Black level detection failed: {str(e)}")

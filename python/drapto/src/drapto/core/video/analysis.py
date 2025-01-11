@@ -136,7 +136,8 @@ class VideoAnalyzer:
                 pixel_format=pixel_format,
                 frame_rate=frame_rate,
                 bit_depth=bit_depth,
-                input_path=input_path
+                input_path=input_path,
+                side_data_list=stream.get('side_data_list', [])
             )
 
             # Optional validation for color properties if present

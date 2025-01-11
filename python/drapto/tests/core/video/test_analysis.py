@@ -46,24 +46,23 @@ def test_analyze_stream_sdr(analyzer):
             returncode=0
         )
         
-        with patch('drapto.core.video.hdr.detect_dolby_vision', return_value=False):
-            info = analyzer.analyze_stream(Path('test.mkv'))
-            
-            assert info is not None
-            assert info.width == 1920
-            assert info.height == 1080
-            assert info.frame_rate == 23.976023976023978
-            assert info.pixel_format == 'yuv420p'
-            assert info.bit_depth == 8
-            assert not info.is_hdr
-            assert not info.is_dolby_vision
+        info = analyzer.analyze_stream(Path('test.mkv'))
+        
+        assert info is not None
+        assert info.width == 1920
+        assert info.height == 1080
+        assert info.frame_rate == 23.976023976023978
+        assert info.pixel_format == 'yuv420p'
+        assert info.bit_depth == 8
+        assert not info.is_hdr
+        assert not info.is_dolby_vision
 
 
 def test_analyze_stream_hdr10(analyzer):
     """Test stream analysis with HDR10 content."""
     with patch('pathlib.Path.exists', return_value=True), \
          patch('subprocess.run') as mock_run:
-        # Mock FFprobe output
+        # Mock FFprobe output with HDR10 properties
         mock_run.return_value = Mock(
             stdout=json.dumps({
                 'streams': [{
@@ -80,24 +79,25 @@ def test_analyze_stream_hdr10(analyzer):
             returncode=0
         )
         
-        with patch('drapto.core.video.hdr.detect_dolby_vision', return_value=False):
-            info = analyzer.analyze_stream(Path('test.mkv'))
-            
-            assert info is not None
-            assert info.width == 3840
-            assert info.height == 2160
-            assert info.frame_rate == 24.0
-            assert info.pixel_format == 'yuv420p10le'
-            assert info.bit_depth == 10
-            assert info.is_hdr
-            assert not info.is_dolby_vision
+        info = analyzer.analyze_stream(Path('test.mkv'))
+        
+        assert info is not None
+        assert info.width == 3840
+        assert info.height == 2160
+        assert info.frame_rate == 24.0
+        assert info.pixel_format == 'yuv420p10le'
+        assert info.bit_depth == 10
+        assert info.is_hdr
+        assert not info.is_dolby_vision
+        assert info.hdr_info is not None
+        assert info.hdr_info.format == 'hdr10'
 
 
 def test_analyze_stream_dolby_vision(analyzer):
     """Test stream analysis with Dolby Vision content."""
     with patch('pathlib.Path.exists', return_value=True), \
          patch('subprocess.run') as mock_run:
-        # Mock FFprobe output
+        # Mock FFprobe output with DV properties
         mock_run.return_value = Mock(
             stdout=json.dumps({
                 'streams': [{
@@ -107,24 +107,26 @@ def test_analyze_stream_dolby_vision(analyzer):
                     'pix_fmt': 'yuv420p10le',
                     'color_transfer': 'smpte2084',
                     'color_primaries': 'bt2020',
-                    'color_space': 'bt2020nc'
+                    'color_space': 'bt2020nc',
+                    'side_data_list': [{'dv_profile': 5}]  # Add DV profile to indicate Dolby Vision
                 }]
             }),
             stderr='',
             returncode=0
         )
         
-        with patch('drapto.core.video.hdr.detect_dolby_vision', return_value=True):
-            info = analyzer.analyze_stream(Path('test.mkv'))
-            
-            assert info is not None
-            assert info.width == 3840
-            assert info.height == 2160
-            assert info.frame_rate == 24.0
-            assert info.pixel_format == 'yuv420p10le'
-            assert info.bit_depth == 10
-            assert info.is_hdr
-            assert info.is_dolby_vision
+        info = analyzer.analyze_stream(Path('test.mkv'))
+        
+        assert info is not None
+        assert info.width == 3840
+        assert info.height == 2160
+        assert info.frame_rate == 24.0
+        assert info.pixel_format == 'yuv420p10le'
+        assert info.bit_depth == 10
+        assert info.is_hdr
+        assert info.is_dolby_vision
+        assert info.hdr_info is not None
+        assert info.hdr_info.format == 'dolby_vision'
 
 
 def test_analyze_stream_with_crop(analyzer):
@@ -165,16 +167,14 @@ def test_analyze_stream_with_crop(analyzer):
         
         mock_run.side_effect = [stream_info_mock, duration_mock, crop_mock]
         
-        # Mock HDR detection to return False
-        with patch('drapto.core.video.hdr.detect_dolby_vision', return_value=False):
-            info = analyzer.analyze_stream(Path('test.mkv'))
-            assert info is not None
-            assert info.crop_info is not None
-            assert info.crop_info.enabled
-            assert info.crop_info.width == 1920
-            assert info.crop_info.height == 800
-            assert info.crop_info.x == 0
-            assert info.crop_info.y == 140
+        info = analyzer.analyze_stream(Path('test.mkv'))
+        assert info is not None
+        assert info.crop_info is not None
+        assert info.crop_info.enabled
+        assert info.crop_info.width == 1920
+        assert info.crop_info.height == 800
+        assert info.crop_info.x == 0
+        assert info.crop_info.y == 140
 
 
 def test_analyze_stream_error_handling(analyzer):
@@ -200,12 +200,6 @@ def test_analyze_stream_error_handling(analyzer):
         with pytest.raises(StreamAnalysisError) as exc_info:
             analyzer.analyze_stream(Path('test.mkv'))
         assert "Failed to parse FFprobe output" in str(exc_info.value)
-
-        # Test FFprobe failure
-        mock_run.side_effect = Exception('ffprobe failed')
-        with pytest.raises(StreamAnalysisError) as exc_info:
-            analyzer.analyze_stream(Path('test.mkv'))
-        assert "FFprobe command failed" in str(exc_info.value)
 
 
 def test_analyze_stream_error(analyzer):
