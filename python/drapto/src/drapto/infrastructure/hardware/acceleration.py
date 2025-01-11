@@ -57,18 +57,9 @@ class HardwareManager:
 
     def detect_acceleration(self) -> HardwareAccel:
         """Detect available hardware acceleration.
-        
-        This method checks for supported hardware acceleration features:
-        - On macOS Apple Silicon: Checks for VideoToolbox support
-        - On Linux: Checks for VAAPI support
-        
-        The detection result is cached after the first call.
-        
+
         Returns:
-            Detected hardware acceleration type
-            
-        Raises:
-            subprocess.SubprocessError: If ffmpeg command fails
+            HardwareAccel: Detected hardware acceleration type
         """
         # Return cached result if available
         if self._detected_accel is not None:
@@ -81,21 +72,37 @@ class HardwareManager:
             self._logger.info("Hardware acceleration disabled by configuration")
             self._detected_accel = HardwareAccel.NONE
             return self._detected_accel
-        
-        # Check platform-specific hardware acceleration
-        system = platform.system()
-        machine = platform.machine()
-        
-        if system == "Darwin" and machine in ("arm64", "aarch64"):
-            if self._check_videotoolbox():
-                self._detected_accel = HardwareAccel.VIDEOTOOLBOX
-                return self._detected_accel
-                
-        elif system == "Linux":
-            if self._check_vaapi():
-                self._detected_accel = HardwareAccel.VAAPI
-                return self._detected_accel
-        
+
+        try:
+            # Get supported hwaccels
+            result = subprocess.run(
+                [str(self._ffmpeg_path), "-hwaccels"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5
+            )
+            hwaccels = result.stdout.strip().split("\n")
+
+            # Check for VideoToolbox on macOS
+            if (platform.system() == "Darwin" and
+                platform.machine() == "arm64" and
+                "videotoolbox" in hwaccels):
+                if self._validate_decoder("videotoolbox"):
+                    self._detected_accel = HardwareAccel.VIDEOTOOLBOX
+                    return self._detected_accel
+
+            # Check for VAAPI on Linux
+            if (platform.system() == "Linux" and
+                "vaapi" in hwaccels and
+                Path("/dev/dri/renderD128").exists()):
+                if self._validate_decoder("vaapi"):
+                    self._detected_accel = HardwareAccel.VAAPI
+                    return self._detected_accel
+
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass
+
         # No supported hardware acceleration found
         self._logger.info("No supported hardware acceleration found")
         self._detected_accel = HardwareAccel.NONE
@@ -118,127 +125,43 @@ class HardwareManager:
             ]
         return []
 
-    def _check_videotoolbox(self) -> bool:
-        """Check for VideoToolbox support.
-        
-        Returns:
-            True if VideoToolbox is supported and working
-        """
-        try:
-            # Check if VideoToolbox is available
-            result = subprocess.run(
-                [str(self._ffmpeg_path), "-hide_banner", "-hwaccels"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=5
-            )
-            if "videotoolbox" not in result.stdout:
-                self._logger.info("VideoToolbox not available")
-                return False
-                
-            # Validate decoder works
-            self._logger.debug("Testing VideoToolbox decoder")
-            return self._validate_decoder("videotoolbox")
-            
-        except subprocess.SubprocessError as e:
-            self._logger.warning("VideoToolbox check failed: %s", str(e))
-            return False
-
-    def _check_vaapi(self) -> bool:
-        """Check for VAAPI support.
-        
-        Returns:
-            True if VAAPI is supported and working
-        """
-        try:
-            # Check if VAAPI device exists
-            if not Path(self._config.vaapi_device).exists():
-                self._logger.info("VAAPI device not found: %s", 
-                              self._config.vaapi_device)
-                return False
-                
-            # Check if VAAPI is available in FFmpeg
-            result = subprocess.run(
-                [str(self._ffmpeg_path), "-hide_banner", "-hwaccels"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=5
-            )
-            if "vaapi" not in result.stdout:
-                self._logger.info("VAAPI not available in FFmpeg")
-                return False
-                
-            # Check vainfo
-            result = subprocess.run(
-                ["vainfo"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=5
-            )
-            if "VAEntrypointVLD" not in result.stdout:
-                self._logger.info("VAAPI decoder not supported")
-                return False
-                
-            # Validate decoder works
-            self._logger.debug("Testing VAAPI decoder")
-            return self._validate_decoder(
-                "vaapi",
-                "-hwaccel_device", self._config.vaapi_device
-            )
-            
-        except subprocess.SubprocessError as e:
-            self._logger.warning("VAAPI check failed: %s", str(e))
-            return False
-        except FileNotFoundError:
-            self._logger.warning("vainfo not found")
-            return False
-
-    def _validate_decoder(self, hwaccel: str, *options: str) -> bool:
-        """Test if hardware decoder works.
+    def _validate_decoder(self, decoder: str) -> bool:
+        """Test if hardware decoder works by decoding a test pattern.
         
         Args:
-            hwaccel: Hardware acceleration type (e.g. videotoolbox, vaapi)
-            options: Additional FFmpeg options
+            decoder: Name of hardware decoder to test
             
         Returns:
-            True if decoder works
+            bool: True if decoder works, False otherwise
         """
         try:
-            # Generate a test pattern and try to decode it
+            # Generate test pattern and pipe to decoder
             cmd = [
                 str(self._ffmpeg_path),
                 "-f", "lavfi",
-                "-i", "testsrc=duration=1:size=1280x720:rate=30",
-                "-c:v", "libx264",
-                "-f", "mp4",
-                "-y",
-                "-",  # Output to pipe
-                "|",  # Pipe to next command
-                str(self._ffmpeg_path),
-                "-hwaccel", hwaccel,
-                *options,
-                "-i", "pipe:",  # Read from pipe
+                "-i", "testsrc=duration=1:size=64x64:rate=1",
+                "-c:v", "rawvideo",
                 "-f", "null",
                 "-"
             ]
             
-            # Run as shell command to support piping
+            if decoder == "videotoolbox":
+                cmd[1:1] = ["-hwaccel", "videotoolbox"]
+            elif decoder == "vaapi":
+                cmd[1:1] = [
+                    "-hwaccel", "vaapi",
+                    "-hwaccel_device", "/dev/dri/renderD128"
+                ]
+                
             subprocess.run(
-                " ".join(cmd),
-                shell=True,
-                capture_output=True,
+                cmd,
                 check=True,
-                timeout=10
+                capture_output=True,
+                timeout=5
             )
-            
-            self._logger.info("Validated hardware decoder: %s", hwaccel)
             return True
             
-        except subprocess.SubprocessError as e:
-            self._logger.warning("Hardware decoder validation failed: %s", str(e))
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired):
             return False
 
     def _is_in_path(self, cmd: str) -> bool:
