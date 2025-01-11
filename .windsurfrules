@@ -4,27 +4,26 @@ Drapto supports two distinct encoding paths:
 1. **Dolby Vision Path**: For content with Dolby Vision metadata
 2. **Chunked Encoding Path**: For all other content
 
-The path selection is automatic based on Dolby Vision detection. The chunked encoding path is the default and preferred method, but Dolby Vision content must use the Dolby Vision path due to technical limitations with chunked encoding of Dolby Vision content.
+Selection is automatic. Chunked is default/preferred; Dolby Vision must use the Dolby Vision path due to technical limitations.
 
-Drapto is a rewrite in Python of the original encode bash scripts.
+Drapto is a rewrite in Python of original encode bash scripts.
 
 ## Project specific rules
 
-Replace ffmpeg and ffprobe calls with FFmpeg Python bindings when possible.
-We are refactoring. Do not change or remove application functionality unless requested or without approval. All application functionality must be preserved.
+Replace ffmpeg/ffprobe calls with FFmpeg Python bindings when possible.
+Refactoring must preserve existing functionality unless otherwise approved.
 When refactoring, search for and reuse existing project code whenever possible. Reuse is always preferred over rewriting.
 When refactoring, clean up unused, obsolete, and redundant code. When code is migrated, ask for approval and remove the old and redundant code.
-Do not remove code that impacts application functionality without asking for approval first.
+Remove unused or obsolete code only after approval.
 If you spot potential application improvements, suggest them and ask for approval.
 Do not change existing default values without first asking for approval.
-If you spot errors, faulty logic, broken logic, or unexpected behavior in the existing Python code, ask for approval first before fixing.
-Stick to the structure and order of the Cascade Implementation Plan while refactoring. If changes to the plan are needed, suggest them and ask for approval first.
-Application terminal output must be clear, concise, easy to understand, and easy for the user to track encoding progress. Terminal output must be formatted correctly for readability.
+For errors or unexpected behavior, ask for approval before fixing.
+Follow the Cascade Implementation Plan structure. Ask for approval if changes are needed.
+Terminal output must be clear, concise, track task progress (encoding, validation, muxing), and show ab-av1/ffmpeg commands with correct formatting.
 Application terminal output must track the progress of each task, including encoding, validation, and muxing.
 Show what ab-av1 or ffmpeg commands are being run in the terminal output so users can understand what is happening. These commands should be formatted correctly.
-Do not make application terminal output cluttered or overly verbose.
-Organize application output so users see relevent messages when the appropriate LOG_LEVEL is set.
-Application functionality should match the reference bash scripts and workflow documentation. Do not deviate without approval.
+Don’t clutter output; organize messages by LOG_LEVEL
+Application functionality should match the reference bash scripts and workflow docs. Do not deviate without approval.
 
 ## Project locations
 
@@ -41,8 +40,8 @@ Application functionality should match the reference bash scripts and workflow d
 /encode_validation.sh
 /encode_video_functions.sh
 
-These are reference scripts only. Do not edit these files.
-Examine the encode bash scripts for guidance when making changes. Point out any code changes or requests that conflict with the bash scripts and ask for clarification and approval.
+These are reference scripts only. Do not edit.
+Examine the encode bash scripts for guidance when making changes. Point out any conflicting code changes or requests and ask for clarification and approval.
 
 ### Drapto Python code:
 
@@ -115,8 +114,9 @@ If you receive approval, make the changes and update the workflow documentation.
 
 ## Rules
 
-Use proper Python coding style, code organization, and best practices.
-When making code changes, always state exactly what you are changing and why.
+Use proper Python style, organization, best practices.
+Always analyze exising code and docs to understand how it works before adding new code.
+Always specify what code changes are made and why.
 Add meaningful comments to explain the purpose of the code.
 Add top level comments to explain the purpose of the file.
 Use type hints to document the expected types of inputs and outputs.
@@ -128,7 +128,7 @@ Use unit tests to validate components.
 ## Troubleshooting Rules
 
 Use proper troubleshooting techniques to diagnose and resolve issues.
-Avoid repeat guesses. Enable debug to view output and narrow down the problem.
+Avoid repeat guesses. Enable debug to narrow down the problem.
 Avoid circular troubleshooting. Track your attempts and progress to narrow down the problem.
-Admit when you do not know an anwser. Ask for help.
+Admit if you do not know. Ask for help.
 State when an approach is not working and why. Suggest alternatives.
