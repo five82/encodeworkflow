@@ -477,7 +477,8 @@ encode_segments() {
     # --halt soon,fail=1 stops all jobs if any job fails
     # --no-notice suppresses citation notice
     # --line-buffer ensures output lines are not mixed
-    if ! parallel --no-notice --line-buffer --halt soon,fail=1 --jobs 0 :::: "$cmd_file"; then
+    # --keep-order ensures output maintains input order
+    if ! parallel --keep-order --no-notice --line-buffer --halt soon,fail=1 --jobs 0 :::: "$cmd_file"; then
         rm "$cmd_file"
         return 1
     fi
