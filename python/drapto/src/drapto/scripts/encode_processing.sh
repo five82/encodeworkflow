@@ -4,7 +4,7 @@
 # Encoding Functions
 ###################
 
-source "${SCRIPT_DIR}/encode_formatting.sh"
+source "${SCRIPT_DIR}/utils/formatting.sh"
 
 # Initialize directories and create if needed
 initialize_directories() {

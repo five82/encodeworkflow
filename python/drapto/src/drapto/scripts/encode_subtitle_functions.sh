@@ -4,7 +4,7 @@
 # Subtitle Functions
 ###################
 
-source "${SCRIPT_DIR}/encode_formatting.sh"
+source "${SCRIPT_DIR}/utils/formatting.sh"
 
 # Set up subtitle options based on input file
 setup_subtitle_options() {

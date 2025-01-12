@@ -4,7 +4,7 @@
 # Video Functions
 ###################
 
-source "${SCRIPT_DIR}/encode_formatting.sh"
+source "${SCRIPT_DIR}/utils/formatting.sh"
 
 # Detect if the input file contains Dolby Vision
 detect_dolby_vision() {

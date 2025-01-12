@@ -4,7 +4,7 @@
 # Audio Functions
 ###################
 
-source "${SCRIPT_DIR}/encode_formatting.sh"
+source "${SCRIPT_DIR}/utils/formatting.sh"
 
 # Set up audio encoding options based on input file
 setup_audio_options() {
