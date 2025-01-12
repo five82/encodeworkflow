@@ -41,6 +41,9 @@ class Encoder:
         env["LOG_DIR"] = str(Path(env["TEMP_DIR"]) / "logs")
         env["INPUT_FILE"] = input_path.name
         
+        # Create logs directory
+        Path(env["LOG_DIR"]).mkdir(parents=True, exist_ok=True)
+        
         # Run encode script with real-time output using pty
         try:
             cmd = [str(self.encode_script)]
