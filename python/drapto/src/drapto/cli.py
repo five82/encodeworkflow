@@ -3,7 +3,7 @@ import os
 import sys
 import click
 from pathlib import Path
-from .core import Encoder, debug_print
+from .core import Encoder
 
 @click.command()
 @click.argument('input_path', type=click.Path(exists=True))
@@ -16,9 +16,6 @@ def main(input_path: str, output_path: str) -> None:
     """
     # Force unbuffered output
     os.environ["PYTHONUNBUFFERED"] = "1"
-    debug_print("CLI started with unbuffered output")
-    
-    debug_print(f"CLI arguments: input={input_path}, output={output_path}")
     
     try:
         encoder = Encoder()

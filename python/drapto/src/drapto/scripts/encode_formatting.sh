@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 
+# Force color if environment variables are set appropriately
+if [[ "$FORCE_COLOR" == "1" ]] || [[ "$CLICOLOR_FORCE" == "1" ]] || [[ "$PTY" == "1" ]]; then
+    FORCE_COLORS=true
+else
+    FORCE_COLORS=false
+fi
+
 # Check if terminal supports colors (both Linux and macOS)
-if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
+if { [[ -t 1 ]] || [[ "$FORCE_COLORS" == true ]]; } && command -v tput >/dev/null 2>&1; then
     # Number of colors
     if [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
         # Basic formatting

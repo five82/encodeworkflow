@@ -13,15 +13,6 @@ initialize_directories() {
         mkdir -p "$OUTPUT_DIR"
     fi
     
-    # Create log directory if it doesn't exist
-    if [[ ! -d "$LOG_DIR" ]]; then
-        mkdir -p "$LOG_DIR"
-    fi
-    
-    # Create and clean temp directories
-    rm -rf "${TEMP_DIR}"
-    mkdir -p "${SEGMENTS_DIR}" "${ENCODED_SEGMENTS_DIR}" "${WORKING_DIR}"
-    
     # Verify input directory exists and contains video files
     if [[ ! -d "$INPUT_DIR" ]]; then
         print_error "Input directory not found: $INPUT_DIR"
@@ -185,6 +176,9 @@ process_audio_track() {
     local track_index="$2"
     local output_file="$3"
 
+    # Ensure working directory exists
+    mkdir -p "${WORKING_DIR}"
+
     print_check "Processing audio track ${track_index}..."
 
     # Get number of channels for this track
@@ -259,6 +253,38 @@ mux_tracks() {
     fi
 
     print_success "Successfully muxed all tracks"
+}
+
+# Concatenate segments
+concatenate_segments() {
+    # Ensure working directory exists
+    mkdir -p "${WORKING_DIR}"
+    
+    local concat_file="${WORKING_DIR}/concat.txt"
+    > "$concat_file"
+    
+    # Add each segment to concat file in order
+    for segment in "${ENCODED_SEGMENTS_DIR}"/*.mkv; do
+        if [[ -f "$segment" ]]; then
+            echo "file '${segment}'" >> "$concat_file"
+        fi
+    done
+    
+    if [[ ! -f "$concat_file" ]]; then
+        print_error "Failed to create concat file"
+        return 1
+    fi
+    
+    # Run ffmpeg concat
+    "$FFMPEG" -y -f concat -safe 0 -i "$concat_file" -c copy "${WORKING_DIR}/video.mkv"
+    local status=$?
+    
+    if [[ $status -ne 0 ]]; then
+        print_error "Failed to concatenate segments"
+        return $status
+    fi
+    
+    return 0
 }
 
 # Handle processing of a single input file

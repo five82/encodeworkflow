@@ -38,7 +38,7 @@ VMAF_SAMPLE_COUNT=3
 VMAF_SAMPLE_LENGTH=1
 
 # Temporary directories for chunked encoding
-TEMP_DIR="${SCRIPT_DIR}/videos/temp"
+TEMP_DIR="${TEMP_DIR:-${SCRIPT_DIR}/videos/temp}"
 SEGMENTS_DIR="${TEMP_DIR}/segments"
 ENCODED_SEGMENTS_DIR="${TEMP_DIR}/encoded_segments"
 WORKING_DIR="${TEMP_DIR}/working"
