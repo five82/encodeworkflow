@@ -5,6 +5,7 @@
 ###################
 
 source "${SCRIPT_DIR}/utils/formatting.sh"
+source "${SCRIPT_DIR}/common/audio_processing.sh"
 
 # Initialize directories and create if needed
 initialize_directories() {
@@ -167,55 +168,6 @@ process_video_track() {
         else
             error "Video encoding failed"
         fi
-    fi
-}
-
-# Process a single audio track
-process_audio_track() {
-    local input_file="$1"
-    local track_index="$2"
-    local output_file="$3"
-
-    # Ensure working directory exists
-    mkdir -p "${WORKING_DIR}"
-
-    print_check "Processing audio track ${track_index}..."
-
-    # Get number of channels for this track
-    local num_channels
-    num_channels=$("${FFPROBE}" -v error -select_streams "a:${track_index}" \
-        -show_entries stream=channels -of csv=p=0 "$input_file")
-    
-    print_check "Found ${num_channels} audio channels"
-
-    # Determine bitrate based on channel count
-    local bitrate
-    local layout
-    case $num_channels in
-        1)  bitrate=64; layout="mono" ;;
-        2)  bitrate=128; layout="stereo" ;;
-        6)  bitrate=256; layout="5.1" ;;
-        8)  bitrate=384; layout="7.1" ;;
-        *)  bitrate=$((num_channels * 48)); layout="custom" ;;
-    esac
-
-    print_check "Configured audio stream ${track_index}: ${num_channels} channels, ${layout} layout, ${bitrate}k bitrate"
-    print_check "Using codec: libopus (VBR mode, compression level 10)"
-
-    # Encode audio track
-    if ! "${FFMPEG}" -hide_banner -loglevel warning \
-        -i "$input_file" \
-        -map "a:${track_index}" \
-        -c:a libopus \
-        -af "aformat=channel_layouts=7.1|5.1|stereo|mono" \
-        -application audio \
-        -vbr on \
-        -compression_level 10 \
-        -frame_duration 20 \
-        -b:a "${bitrate}k" \
-        -avoid_negative_ts make_zero \
-        -y "$output_file"; then
-        error "Failed to encode audio track ${track_index}"
     fi
 }
 

@@ -23,7 +23,7 @@ fi
 source "${SCRIPT_DIR}/encode_config.sh"
 source "${SCRIPT_DIR}/encode_utilities.sh"
 source "${SCRIPT_DIR}/encode_video_functions.sh"
-source "${SCRIPT_DIR}/encode_audio_functions.sh"
+source "${SCRIPT_DIR}/common/audio_processing.sh"
 source "${SCRIPT_DIR}/encode_subtitle_functions.sh"
 source "${SCRIPT_DIR}/encode_hardware_acceleration.sh"
 source "${SCRIPT_DIR}/encode_validation.sh"
