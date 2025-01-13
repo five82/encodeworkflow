@@ -33,13 +33,14 @@ class Encoder:
         for script in self.script_dir.glob("*.sh"):
             script.chmod(0o755)
     
-    def _encode_file(self, input_path: Path, output_path: Path, env: dict) -> None:
+    def _encode_file(self, input_path: Path, output_path: Path, env: dict, is_last_file: bool = True) -> None:
         """Encode a single video file."""
         # Set up environment
         env["INPUT_DIR"] = str(input_path.parent)
         env["OUTPUT_DIR"] = str(output_path.parent)
         env["LOG_DIR"] = str(Path(env["TEMP_DIR"]) / "logs")
         env["INPUT_FILE"] = input_path.name
+        env["PRINT_FINAL_SUMMARY"] = "1" if is_last_file else "0"
         
         # Create logs directory
         Path(env["LOG_DIR"]).mkdir(parents=True, exist_ok=True)
@@ -206,9 +207,10 @@ class Encoder:
                     output_path.mkdir(parents=True, exist_ok=True)
                 
                 # Process each video file in the directory
-                for file in input_path.glob("*.mkv"):
+                files = list(input_path.glob("*.mkv"))
+                for i, file in enumerate(files):
                     out_file = output_path / file.name
-                    self._encode_file(file, out_file, env)
+                    self._encode_file(file, out_file, env, is_last_file=(i == len(files)-1))
                     # Clean up only segments and encoded segments
                     for dir_path in [segments_dir, encoded_segments_dir]:
                         if dir_path.exists():

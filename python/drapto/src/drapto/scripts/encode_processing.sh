@@ -19,6 +19,23 @@ initialize_directories() {
         print_error "Input directory not found: $INPUT_DIR"
         exit 1
     fi
+
+    # Create encode data directory and initialize files
+    mkdir -p "${TEMP_DATA_DIR}"
+    
+    # Create empty files if they don't exist
+    if [[ ! -f "${ENCODED_FILES_DATA}" ]]; then
+        touch "${ENCODED_FILES_DATA}"
+    fi
+    if [[ ! -f "${ENCODING_TIMES_DATA}" ]]; then
+        touch "${ENCODING_TIMES_DATA}"
+    fi
+    if [[ ! -f "${INPUT_SIZES_DATA}" ]]; then
+        touch "${INPUT_SIZES_DATA}"
+    fi
+    if [[ ! -f "${OUTPUT_SIZES_DATA}" ]]; then
+        touch "${OUTPUT_SIZES_DATA}"
+    fi
 }
 
 # Clean up temporary files
@@ -134,7 +151,6 @@ process_file() {
     input_size=$(get_file_size "$input_file")
     local output_size
     output_size=$(get_file_size "$output_file")
-    print_encoding_summary "$filename" "$input_size" "$output_size"
 }
 
 # Process a single video track
@@ -243,17 +259,14 @@ concatenate_segments() {
 process_single_file() {
     local input_file="$1"
     local filename
-    filename=$(basename "${input_file}")
-    local filename_noext="${filename%.*}"
+    filename=$(basename "$input_file")
     local output_file="${OUTPUT_DIR}/${filename}"
-    local timestamp
-    timestamp=$(get_timestamp)
-    local log_file="${LOG_DIR}/${filename_noext}_${timestamp}.log"
+    local log_file="${LOG_DIR}/${filename%.*}.log"
 
+    # Start timing this file
     local file_start_time
     file_start_time=$(date +%s)
 
-    # Process the file
     process_file "${input_file}" "${output_file}" "${log_file}" "${filename}" 2>&1 | tee "${log_file}"
 
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
@@ -266,51 +279,88 @@ process_single_file() {
 # Handle actions after a successful encode
 handle_successful_encode() {
     local filename="$1"
-    local file_start_time="$2"
+    local start_time="$2"
     local input_file="$3"
     local output_file="$4"
 
-    local file_end_time
-    file_end_time=$(date +%s)
-    local file_elapsed_time=$((file_end_time - file_start_time))
+    # Calculate encoding time
+    local end_time
+    end_time=$(date +%s)
+    local encoding_time=$((end_time - start_time))
 
-    # Store encoding information
+    # Get file sizes
+    local input_size
+    input_size=$(get_file_size "$input_file")
+    local output_size
+    output_size=$(get_file_size "$output_file")
+
+    # Store the results for final summary
     encoded_files+=("$filename")
-    encoding_times+=("$file_elapsed_time")
-    input_sizes+=("$(get_file_size "${input_file}")")
-    output_sizes+=("$(get_file_size "${output_file}")")
+    encoding_times+=("$encoding_time")
+    input_sizes+=("$input_size")
+    output_sizes+=("$output_size")
 
-    print_completion_message "$filename" "$file_elapsed_time"
-}
+    # Save arrays immediately after updating
+    save_arrays
 
-# Print completion message after encoding a file
-print_completion_message() {
-    local filename="$1"
-    local elapsed_time="$2"
-
-    local hours minutes seconds
-    hours=$((elapsed_time / 3600))
-    minutes=$(( (elapsed_time % 3600) / 60 ))
-    seconds=$((elapsed_time % 60))
-
+    # Print individual encode summary
+    print_header "Individual File Encoding Summary"
+    printf "\n"
+    printf "File: %s\n" "$filename"
+    printf "Input size:  %s\n" "$(format_size "$input_size")"
+    printf "Output size: %s\n" "$(format_size "$output_size")"
+    printf "Reduction:   %.2f%%\n" "$(calculate_reduction "$input_size" "$output_size")"
     print_separator
-    echo "Completed: ${filename}"
-    printf "Encoding time: %02dh %02dm %02ds\n" "$hours" "$minutes" "$seconds"
-    echo "Finished encode at $(date)"
+    printf "Encoding time: %s\n" "$(format_time "$encoding_time")"
+    printf "Finished encode at %s\n" "$(date)"
     print_separator
 }
 
-# Print the final summary after processing all files
+# Save arrays to files
+save_arrays() {
+    # Create temp directory if it doesn't exist
+    mkdir -p "$TEMP_DATA_DIR"
+
+    # Save each array to a temporary file first
+    local temp_files=("${ENCODED_FILES_DATA}.tmp" "${ENCODING_TIMES_DATA}.tmp" "${INPUT_SIZES_DATA}.tmp" "${OUTPUT_SIZES_DATA}.tmp")
+    local final_files=("$ENCODED_FILES_DATA" "$ENCODING_TIMES_DATA" "$INPUT_SIZES_DATA" "$OUTPUT_SIZES_DATA")
+    local arrays=("${encoded_files[*]}" "${encoding_times[*]}" "${input_sizes[*]}" "${output_sizes[*]}")
+
+    for i in "${!temp_files[@]}"; do
+        # Use printf to ensure proper handling of special characters and ensure newline
+        printf "%s\n" "${arrays[$i]}" > "${temp_files[$i]}"
+        sync "${temp_files[$i]}" # Force write to disk
+        
+        # Move temp file to final file
+        mv "${temp_files[$i]}" "${final_files[$i]}"
+        sync "${final_files[$i]}" # Force write to disk
+    done
+}
+
+# Load arrays from files if they exist
+load_arrays() {
+    # Check if the main file exists and has content
+    if [ ! -s "$ENCODED_FILES_DATA" ]; then
+        # Initialize empty arrays
+        encoded_files=()
+        encoding_times=()
+        input_sizes=()
+        output_sizes=()
+    else
+        # Read arrays from files
+        mapfile -t encoded_files < "$ENCODED_FILES_DATA"
+        mapfile -t encoding_times < "$ENCODING_TIMES_DATA"
+        mapfile -t input_sizes < "$INPUT_SIZES_DATA"
+        mapfile -t output_sizes < "$OUTPUT_SIZES_DATA"
+    fi
+}
+
+# Print the final encoding summary
 print_final_summary() {
     local total_start_time="$1"
     local total_end_time
     total_end_time=$(date +%s)
     local total_elapsed_time=$((total_end_time - total_start_time))
-
-    local total_hours total_minutes total_seconds
-    total_hours=$((total_elapsed_time / 3600))
-    total_minutes=$(( (total_elapsed_time % 3600) / 60 ))
-    total_seconds=$((total_elapsed_time % 60))
 
     print_header "Final Encoding Summary"
     
@@ -320,24 +370,67 @@ print_final_summary() {
         local input_size="${input_sizes[$i]}"
         local output_size="${output_sizes[$i]}"
         local encoding_time="${encoding_times[$i]}"
-        local encode_seconds=$((encoding_time))
-        local encode_hours=$((encode_seconds / 3600))
-        local encode_minutes=$(( (encode_seconds % 3600) / 60 ))
-        local encode_seconds=$((encode_seconds % 60))
 
         print_separator
         echo "File: $filename"
-        echo "Input size:  $(numfmt --to=iec-i --suffix=B "$input_size")"
-        echo "Output size: $(numfmt --to=iec-i --suffix=B "$output_size")"
+        echo "Input size:  $(format_size "$input_size")"
+        echo "Output size: $(format_size "$output_size")"
         local reduction
-        reduction=$(awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}")
+        reduction=$(calculate_reduction "$input_size" "$output_size")
         echo "Reduction:   ${reduction}%"
-        printf "Encode time: %02dh %02dm %02ds\n" "$encode_hours" "$encode_minutes" "$encode_seconds"
+        echo "Encode time: $(format_time "$encoding_time")"
     done
     
     print_separator
-    printf "Total execution time: %02dh %02dm %02ds\n" "$total_hours" "$total_minutes" "$total_seconds"
+    
+    # Calculate totals
+    local total_input_size=0
+    local total_output_size=0
+    for i in "${!input_sizes[@]}"; do
+        total_input_size=$((total_input_size + input_sizes[i]))
+        total_output_size=$((total_output_size + output_sizes[i]))
+    done
+
+    echo "Total files processed: ${#encoded_files[@]}"
+    echo "Total input size:  $(format_size "$total_input_size")"
+    echo "Total output size: $(format_size "$total_output_size")"
+    local total_reduction
+    total_reduction=$(calculate_reduction "$total_input_size" "$total_output_size")
+    echo "Total reduction:   ${total_reduction}%"
+    echo "Total execution time: $(format_time "$total_elapsed_time")"
 }
+
+# Format file size in human readable format
+format_size() {
+    local size="$1"
+    numfmt --to=iec-i --suffix=B "$size"
+}
+
+# Format time in HH:MM:SS format
+format_time() {
+    local seconds="$1"
+    local hours=$((seconds / 3600))
+    local minutes=$(( (seconds % 3600) / 60 ))
+    local seconds=$((seconds % 60))
+    printf "%02dh %02dm %02ds" "$hours" "$minutes" "$seconds"
+}
+
+# Calculate reduction percentage
+calculate_reduction() {
+    local input_size="$1"
+    local output_size="$2"
+    awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}"
+}
+
+# Initialize array storage
+TEMP_DATA_DIR="${TEMP_DIR}/encode_data"
+mkdir -p "${TEMP_DATA_DIR}"
+
+# Files to store array data
+ENCODED_FILES_DATA="${TEMP_DATA_DIR}/encoded_files.txt"
+ENCODING_TIMES_DATA="${TEMP_DATA_DIR}/encoding_times.txt"
+INPUT_SIZES_DATA="${TEMP_DATA_DIR}/input_sizes.txt"
+OUTPUT_SIZES_DATA="${TEMP_DATA_DIR}/output_sizes.txt"
 
 # Main processing function
 main() {
@@ -350,6 +443,9 @@ main() {
     # Start total timing
     local total_start_time
     total_start_time=$(date +%s)
+
+    # Load existing array data
+    load_arrays
 
     # Get input files
     local files=()
@@ -376,9 +472,14 @@ main() {
     # Process each file
     for input_file in "${files[@]}"; do
         process_single_file "$input_file"
+        # Save arrays after each file is processed
+        save_arrays
     done
 
-    print_final_summary "$total_start_time"
+    # Print the final summary only if this is the last file
+    if [[ "${PRINT_FINAL_SUMMARY}" == "1" ]]; then
+        print_final_summary "$total_start_time"
+    fi
     
     # Clean up
     cleanup_temp_files

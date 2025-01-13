@@ -265,33 +265,6 @@ get_stream_sizes() {
     echo "${video_size:-0},${audio_size:-0}"
 }
 
-# Print a summary of the encoding process for a single file
-print_encoding_summary() {
-    local filename="$1"
-    local input_size="$2"
-    local output_size="$3"
-    
-    if [[ -z "$input_size" ]] || [[ -z "$output_size" ]]; then
-        error "Missing size information for $filename"
-        return 1
-    fi
-
-    # Calculate size reduction percentage
-    local reduction
-    reduction=$(awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}")
-
-    # Format sizes in human-readable format
-    local input_hr
-    local output_hr
-    input_hr=$(numfmt --to=iec-i --suffix=B "$input_size")
-    output_hr=$(numfmt --to=iec-i --suffix=B "$output_size")
-
-    print_header "Encoding Summary"
-    echo "Input size:  $input_hr"
-    echo "Output size: $output_hr"
-    echo "Reduction:   ${reduction}%"
-}
-
 # Configure hardware acceleration options
 configure_hw_accel_options() {
     local hw_options=""
