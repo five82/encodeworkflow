@@ -151,3 +151,56 @@ detect_crop() {
         echo "crop=${original_width}:${original_height}:0:0"
     fi
 }
+
+# Get sizes of the video and audio streams in a file
+get_stream_sizes() {
+    local file="$1"
+    local video_size=0
+    local audio_size=0
+
+    # Create temp directory for demuxed streams
+    local temp_dir
+    temp_dir=$(mktemp -d)
+
+    # Get video codec and extract
+    local video_codec
+    video_codec=$("${FFPROBE}" -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$file")
+
+    case "$video_codec" in
+        h264) video_ext="h264" ;;
+        hevc) video_ext="hevc" ;;
+        av1)  video_ext="obu" ;;
+        *)    video_ext="mkv" ;;
+    esac
+    local video_file="${temp_dir}/video.${video_ext}"
+    "${FFMPEG}" -v error -i "$file" -map 0:v:0 -c copy "${video_file}"
+
+    # Get audio codec and extract
+    local audio_codec
+    audio_codec=$("${FFPROBE}" -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$file")
+
+    case "$audio_codec" in
+        aac)  audio_ext="aac" ;;
+        ac3)  audio_ext="ac3" ;;
+        dts)  audio_ext="dts" ;;
+        opus) audio_ext="opus" ;;
+        *)    audio_ext="mka" ;;
+    esac
+    local audio_file="${temp_dir}/audio.${audio_ext}"
+    "${FFMPEG}" -v error -i "$file" -map 0:a -c copy "${audio_file}"
+
+    # Get sizes if files exist
+    if [[ -f "${video_file}" ]]; then
+        video_size=$(get_file_size "${video_file}")
+    fi
+
+    if [[ -f "${audio_file}" ]]; then
+        audio_size=$(get_file_size "${audio_file}")
+    fi
+
+    # Cleanup temp files
+    rm -rf "${temp_dir}"
+
+    # Return both sizes
+    echo "${video_size:-0},${audio_size:-0}"
+}
