@@ -5,6 +5,7 @@
 ###################
 
 source "${SCRIPT_DIR}/utils/formatting.sh"
+source "${SCRIPT_DIR}/encode_hardware_acceleration.sh"
 source "${SCRIPT_DIR}/common/audio_processing.sh"
 source "${SCRIPT_DIR}/common/video_utils.sh"
 

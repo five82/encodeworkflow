@@ -204,3 +204,22 @@ get_stream_sizes() {
     # Return both sizes
     echo "${video_size:-0},${audio_size:-0}"
 }
+
+# Configure hardware acceleration options
+configure_hw_accel_options() {
+    print_check "Checking for hardware acceleration..."
+    local hw_options=""
+    
+    case "${HW_ACCEL}" in
+        "videotoolbox")
+            print_check "Hardware acceleration detected: videotoolbox"
+            hw_options="-hwaccel videotoolbox"
+            ;;
+        *)
+            print_check "Hardware acceleration not detected"
+            hw_options=""
+            ;;
+    esac
+    
+    printf "%s" "${hw_options}"
+}

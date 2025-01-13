@@ -64,22 +64,6 @@ setup_video_options() {
     printf "%s" "${video_opts}"
 }
 
-# Configure hardware acceleration options
-configure_hw_accel_options() {
-    local hw_options=""
-    
-    case "${HW_ACCEL}" in
-        "videotoolbox")
-            hw_options="-hwaccel videotoolbox"
-            ;;
-        *)
-            hw_options=""
-            ;;
-    esac
-    
-    echo "${hw_options}"
-}
-
 # Validate video segments
 validate_segments() {
     print_check "Validating segments..."
