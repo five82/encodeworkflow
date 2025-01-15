@@ -9,6 +9,7 @@ source "${SCRIPT_DIR}/encode_hardware_acceleration.sh"
 source "${SCRIPT_DIR}/common/audio_processing.sh"
 source "${SCRIPT_DIR}/common/video_utils.sh"
 source "${SCRIPT_DIR}/encode_strategies/chunked_encoding.sh"
+source "${SCRIPT_DIR}/encode_strategies/dolby_vision.sh"
 
 # Initialize directories and create if needed
 initialize_directories() {
