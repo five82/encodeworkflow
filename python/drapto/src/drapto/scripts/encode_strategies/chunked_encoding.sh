@@ -183,3 +183,47 @@ encode_segments() {
     rm "$cmd_file"
     return 0
 }
+
+# Concatenate encoded segments back into a single file
+concatenate_segments() {
+    local output_file="$1"
+    local concat_file="${WORKING_DIR}/concat.txt"
+
+    # Ensure directories exist
+    mkdir -p "${WORKING_DIR}" "${ENCODED_SEGMENTS_DIR}"
+
+    # Debug: show contents of encoded segments directory
+    echo "Debug: Contents of ${ENCODED_SEGMENTS_DIR}:"
+    ls -l "${ENCODED_SEGMENTS_DIR}" || echo "Failed to list directory"
+
+    # Create concat file with proper format
+    > "$concat_file"
+    
+    # Check if there are any mkv files
+    if ! compgen -G "${ENCODED_SEGMENTS_DIR}/*.mkv" > /dev/null; then
+        error "No .mkv files found in ${ENCODED_SEGMENTS_DIR}"
+        return 1
+    fi
+
+    for segment in "${ENCODED_SEGMENTS_DIR}"/*.mkv; do
+        if [[ -f "$segment" ]]; then
+            echo "Debug: Adding segment: $segment"
+            echo "file '$(realpath "$segment")'" >> "$concat_file"
+        fi
+    done
+
+    if [[ ! -s "$concat_file" ]]; then
+        error "No segments found to concatenate"
+        echo "Debug: concat.txt is empty or missing"
+        return 1
+    fi
+
+    echo "Debug: Contents of concat.txt:"
+    cat "$concat_file"
+
+    # Concatenate video segments directly to output file
+    if ! "$FFMPEG" -hide_banner -loglevel error -f concat -safe 0 -i "$concat_file" -c copy "$output_file"; then
+        error "Failed to concatenate video segments"
+        return 1
+    fi
+}
