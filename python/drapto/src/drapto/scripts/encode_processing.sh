@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/utils/formatting.sh"
 source "${SCRIPT_DIR}/encode_hardware_acceleration.sh"
 source "${SCRIPT_DIR}/common/audio_processing.sh"
 source "${SCRIPT_DIR}/common/video_utils.sh"
+source "${SCRIPT_DIR}/common/file_operations.sh"
 source "${SCRIPT_DIR}/encode_strategies/chunked_encoding.sh"
 source "${SCRIPT_DIR}/encode_strategies/dolby_vision.sh"
 
