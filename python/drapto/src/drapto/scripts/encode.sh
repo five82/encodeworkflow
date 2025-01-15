@@ -20,7 +20,7 @@ else
 fi
 
 # Source configuration and function files with consistent naming
-source "${SCRIPT_DIR}/encode_config.sh"
+source "${SCRIPT_DIR}/common/config.sh"
 source "${SCRIPT_DIR}/encode_utilities.sh"
 source "${SCRIPT_DIR}/encode_video_functions.sh"
 source "${SCRIPT_DIR}/common/audio_processing.sh"
