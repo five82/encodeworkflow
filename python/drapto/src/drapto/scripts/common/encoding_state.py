@@ -8,6 +8,7 @@ This module handles state tracking for video encoding jobs, including:
 - Input/output file information
 - Encoding statistics
 - Segment tracking
+- Progress tracking
 """
 
 import json
@@ -36,6 +37,17 @@ class SegmentStatus(Enum):
     FAILED = "failed"
 
 @dataclass
+class Progress:
+    """Progress information"""
+    percent: float = 0.0
+    current_frame: int = 0
+    total_frames: int = 0
+    fps: float = 0.0
+    eta_seconds: float = 0.0
+    started_at: float = 0.0
+    updated_at: float = 0.0
+
+@dataclass
 class EncodingStats:
     """Statistics for an encoding job"""
     input_size: int = 0
@@ -45,6 +57,8 @@ class EncodingStats:
     vmaf_score: float = 0.0
     segment_count: int = 0
     completed_segments: int = 0
+    total_frames: int = 0
+    encoded_frames: int = 0
 
 @dataclass
 class Segment:
@@ -55,6 +69,8 @@ class Segment:
     status: SegmentStatus = SegmentStatus.PENDING
     start_time: float = 0.0
     duration: float = 0.0
+    total_frames: int = 0
+    progress: Progress = field(default_factory=Progress)
     error_message: Optional[str] = None
 
 @dataclass
@@ -67,6 +83,7 @@ class EncodingJob:
     strategy: str
     stats: EncodingStats
     segments: Dict[int, Segment] = field(default_factory=dict)
+    progress: Progress = field(default_factory=Progress)
     error_message: Optional[str] = None
 
 class EncodingState:
@@ -231,6 +248,126 @@ class EncodingState:
                 setattr(job.stats, key, value)
         self._save_state()
     
+    def update_job_progress(self, job_id: str, current_frame: int, total_frames: int,
+                          fps: float = 0.0) -> None:
+        """Update progress of an encoding job
+        
+        Args:
+            job_id: Job identifier
+            current_frame: Current frame being encoded
+            total_frames: Total frames to encode
+            fps: Current encoding speed in frames per second
+        """
+        if job_id not in self.jobs:
+            raise KeyError(f"Job {job_id} not found")
+        
+        job = self.jobs[job_id]
+        now = time.time()
+        
+        # Update job progress
+        if job.progress.started_at == 0.0:
+            job.progress.started_at = now
+        
+        job.progress.current_frame = current_frame
+        job.progress.total_frames = total_frames
+        job.progress.fps = fps
+        job.progress.updated_at = now
+        
+        # Calculate overall progress
+        if total_frames > 0:
+            job.progress.percent = (current_frame / total_frames) * 100
+            
+            # Calculate ETA
+            if fps > 0:
+                remaining_frames = total_frames - current_frame
+                job.progress.eta_seconds = remaining_frames / fps
+        
+        # Update job stats
+        job.stats.total_frames = total_frames
+        job.stats.encoded_frames = current_frame
+        
+        self._save_state()
+    
+    def update_segment_progress(self, job_id: str, index: int, current_frame: int,
+                              total_frames: int, fps: float = 0.0) -> None:
+        """Update progress of a segment
+        
+        Args:
+            job_id: Job identifier
+            index: Segment index
+            current_frame: Current frame being encoded
+            total_frames: Total frames to encode
+            fps: Current encoding speed in frames per second
+        """
+        if job_id not in self.jobs:
+            raise KeyError(f"Job {job_id} not found")
+        
+        job = self.jobs[job_id]
+        if index not in job.segments:
+            raise KeyError(f"Segment {index} not found in job {job_id}")
+        
+        segment = job.segments[index]
+        now = time.time()
+        
+        # Update segment progress
+        if segment.progress.started_at == 0.0:
+            segment.progress.started_at = now
+        
+        segment.progress.current_frame = current_frame
+        segment.progress.total_frames = total_frames
+        segment.progress.fps = fps
+        segment.progress.updated_at = now
+        
+        # Calculate segment progress
+        if total_frames > 0:
+            segment.progress.percent = (current_frame / total_frames) * 100
+            
+            # Calculate ETA
+            if fps > 0:
+                remaining_frames = total_frames - current_frame
+                segment.progress.eta_seconds = remaining_frames / fps
+        
+        # Update segment total frames
+        segment.total_frames = total_frames
+        
+        # Update overall job progress
+        total_job_frames = sum(s.total_frames for s in job.segments.values())
+        encoded_frames = sum(s.progress.current_frame for s in job.segments.values())
+        self.update_job_progress(job_id, encoded_frames, total_job_frames, fps)
+    
+    def get_progress(self, job_id: str) -> Progress:
+        """Get progress information for a job
+        
+        Args:
+            job_id: Job identifier
+            
+        Returns:
+            Progress: Job progress information
+        """
+        if job_id not in self.jobs:
+            raise KeyError(f"Job {job_id} not found")
+        
+        return self.jobs[job_id].progress
+    
+    def get_segment_progress(self, job_id: str, index: int) -> Progress:
+        """Get progress information for a segment
+        
+        Args:
+            job_id: Job identifier
+            index: Segment index
+            
+        Returns:
+            Progress: Segment progress information
+        """
+        if job_id not in self.jobs:
+            raise KeyError(f"Job {job_id} not found")
+        
+        job = self.jobs[job_id]
+        if index not in job.segments:
+            raise KeyError(f"Segment {index} not found in job {job_id}")
+        
+        return job.segments[index].progress
+    
     def get_job(self, job_id: str) -> EncodingJob:
         """Get information about an encoding job
         
@@ -253,46 +390,62 @@ class EncodingState:
         return list(self.jobs.values())
     
     def _save_state(self) -> None:
-        """Save current state to disk"""
-        state_file = self.state_dir / "encoding_state.json"
-        state = {}
-        for job_id, job in self.jobs.items():
-            # Convert job to dict and handle Enum serialization
-            job_dict = asdict(job)
-            job_dict['status'] = job.status.value
-            
-            # Handle segments
-            segments = {}
-            for idx, segment in job.segments.items():
-                seg_dict = asdict(segment)
-                seg_dict['status'] = segment.status.value
-                segments[str(idx)] = seg_dict
-            job_dict['segments'] = segments
-            
-            state[job_id] = job_dict
+        """Save state to disk"""
+        state_file = self.state_dir / "state.json"
         
-        with open(state_file, 'w') as f:
-            json.dump(state, f, indent=2)
+        # Convert jobs to dict for serialization
+        jobs_dict = {}
+        for job_id, job in self.jobs.items():
+            job_dict = asdict(job)
+            
+            # Convert enums to strings
+            job_dict["status"] = job.status.value
+            
+            # Convert segments
+            segments_dict = {}
+            for idx, segment in job.segments.items():
+                segment_dict = asdict(segment)
+                segment_dict["status"] = segment.status.value
+                segments_dict[idx] = segment_dict
+            job_dict["segments"] = segments_dict
+            
+            jobs_dict[job_id] = job_dict
+        
+        with open(state_file, "w") as f:
+            json.dump(jobs_dict, f, indent=2)
     
     def _load_state(self) -> None:
         """Load state from disk"""
-        state_file = self.state_dir / "encoding_state.json"
+        state_file = self.state_dir / "state.json"
         if not state_file.exists():
             return
         
         with open(state_file) as f:
-            state = json.load(f)
+            jobs_dict = json.load(f)
         
-        for job_id, job_dict in state.items():
-            # Convert status strings back to enums
-            job_dict['status'] = JobStatus(job_dict['status'])
-            job_dict['stats'] = EncodingStats(**job_dict['stats'])
+        # Convert dict back to jobs
+        for job_id, job_dict in jobs_dict.items():
+            # Convert status string back to enum
+            job_dict["status"] = JobStatus(job_dict["status"])
             
             # Convert segments
             segments = {}
-            for idx, seg_dict in job_dict['segments'].items():
-                seg_dict['status'] = SegmentStatus(seg_dict['status'])
-                segments[int(idx)] = Segment(**seg_dict)
-            job_dict['segments'] = segments
+            for idx, segment_dict in job_dict["segments"].items():
+                # Convert segment status string back to enum
+                segment_dict["status"] = SegmentStatus(segment_dict["status"])
+                
+                # Convert progress dict to Progress object
+                segment_dict["progress"] = Progress(**segment_dict["progress"])
+                
+                # Create Segment object
+                segments[int(idx)] = Segment(**segment_dict)
+            job_dict["segments"] = segments
             
+            # Convert progress dict to Progress object
+            job_dict["progress"] = Progress(**job_dict["progress"])
+            
+            # Convert stats dict to EncodingStats object
+            job_dict["stats"] = EncodingStats(**job_dict["stats"])
+            
+            # Create EncodingJob object
             self.jobs[job_id] = EncodingJob(**job_dict)

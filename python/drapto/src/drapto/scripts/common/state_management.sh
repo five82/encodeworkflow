@@ -181,3 +181,75 @@ jobs = state.get_all_jobs()
 print(json.dumps([job.__dict__ for job in jobs], default=str))
 "
 }
+
+# Update job progress
+# Args:
+#   $1: Job ID
+#   $2: Current frame
+#   $3: Total frames
+#   $4: FPS (optional)
+update_job_progress() {
+    local job_id="$1"
+    local current_frame="$2"
+    local total_frames="$3"
+    local fps="${4:-0.0}"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+state = EncodingState('${TEMP_DATA_DIR}')
+state.update_job_progress('${job_id}', ${current_frame}, ${total_frames}, ${fps})
+"
+}
+
+# Update segment progress
+# Args:
+#   $1: Job ID
+#   $2: Segment index
+#   $3: Current frame
+#   $4: Total frames
+#   $5: FPS (optional)
+update_segment_progress() {
+    local job_id="$1"
+    local index="$2"
+    local current_frame="$3"
+    local total_frames="$4"
+    local fps="${5:-0.0}"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+state = EncodingState('${TEMP_DATA_DIR}')
+state.update_segment_progress('${job_id}', ${index}, ${current_frame}, ${total_frames}, ${fps})
+"
+}
+
+# Get job progress
+# Args:
+#   $1: Job ID
+get_job_progress() {
+    local job_id="$1"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+import json
+state = EncodingState('${TEMP_DATA_DIR}')
+progress = state.get_progress('${job_id}')
+print(json.dumps(progress.__dict__, default=str))
+"
+}
+
+# Get segment progress
+# Args:
+#   $1: Job ID
+#   $2: Segment index
+get_segment_progress() {
+    local job_id="$1"
+    local index="$2"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+import json
+state = EncodingState('${TEMP_DATA_DIR}')
+progress = state.get_segment_progress('${job_id}', ${index})
+print(json.dumps(progress.__dict__, default=str))
+"
+}
