@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Import common utilities and state management
+source "${SCRIPT_DIR}/common/config.sh"
+source "${SCRIPT_DIR}/common/state_management.sh"
+
 ###################
 # Chunked Encoding Strategy
 ###################
-
-source "${SCRIPT_DIR}/utils/formatting.sh"
-source "${SCRIPT_DIR}/encode_strategies/strategy_base.sh"
-
-# Implementation of strategy interface
 
 # Initialize chunked encoding
 # Args:
@@ -23,11 +25,20 @@ initialize_encoding() {
     # Create required directories
     mkdir -p "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$WORKING_DIR"
     
+    # Create encoding job and store job ID
+    JOB_ID=$(create_encoding_job "$input_file" "$output_file" "chunked")
+    if [[ -z "$JOB_ID" ]]; then
+        error "Failed to create encoding job"
+        return 1
+    fi
+    export JOB_ID
+    
     # Export variables needed by parallel encoding
     export PRESET
     export VMAF_SAMPLE_COUNT
     export VMAF_SAMPLE_LENGTH
     
+    print_success "Created encoding job: $JOB_ID"
     return 0
 }
 
