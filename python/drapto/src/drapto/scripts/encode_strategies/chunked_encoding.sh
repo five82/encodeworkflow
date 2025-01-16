@@ -5,6 +5,118 @@
 ###################
 
 source "${SCRIPT_DIR}/utils/formatting.sh"
+source "${SCRIPT_DIR}/encode_strategies/strategy_base.sh"
+
+# Implementation of strategy interface
+
+# Initialize chunked encoding
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+initialize_encoding() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Initializing chunked encoding strategy..."
+    
+    # Create required directories
+    mkdir -p "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$WORKING_DIR"
+    
+    # Export variables needed by parallel encoding
+    export PRESET
+    export VMAF_SAMPLE_COUNT
+    export VMAF_SAMPLE_LENGTH
+    
+    return 0
+}
+
+# Prepare video by segmenting it
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+prepare_video() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Preparing video for chunked encoding..."
+    
+    # Segment the video
+    if ! segment_video "$input_file" "$SEGMENTS_DIR"; then
+        error "Failed to segment video"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Encode video segments in parallel
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+encode_video() {
+    local input_file="$1"
+    local output_file="$2"
+    local options="$3"
+    
+    print_check "Encoding video segments..."
+    
+    # Parse options
+    local target_vmaf="$TARGET_VMAF"
+    local disable_crop="$DISABLE_CROP"
+    local crop_filter=""
+    
+    # Get crop filter if needed
+    if [[ "$disable_crop" != "true" ]]; then
+        crop_filter=$(detect_crop "$input_file" "$disable_crop")
+    fi
+    
+    # Encode segments
+    if ! encode_segments "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$target_vmaf" "$disable_crop" "$crop_filter"; then
+        error "Failed to encode segments"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Finalize by concatenating segments
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+finalize_encoding() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Finalizing chunked encoding..."
+    
+    # Concatenate segments
+    if ! concatenate_segments "$output_file"; then
+        error "Failed to concatenate segments"
+        return 1
+    fi
+    
+    # Cleanup temporary files
+    cleanup_temp_files
+    
+    return 0
+}
+
+# Check if this strategy can handle the input
+# Args:
+#   $1: Input file path
+can_handle() {
+    local input_file="$1"
+    
+    # Chunked encoding can handle any input that's not Dolby Vision
+    if ! detect_dolby_vision "$input_file"; then
+        return 0
+    fi
+    return 1
+}
 
 # Validate video segments
 validate_segments() {

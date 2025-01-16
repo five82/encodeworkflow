@@ -497,27 +497,46 @@ process_video() {
     
     echo "Processing: $(basename "$input_file")"
     
-    # Detect Dolby Vision
-    detect_dolby_vision "$input_file"
-    
-    # Check for hardware acceleration only on macOS
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "macOS detected, checking hardware acceleration."
-        check_hardware_acceleration
-        HWACCEL_OPTS=$(configure_hw_accel_options)
+    # Select encoding strategy based on input file
+    local strategy
+    if detect_dolby_vision "$input_file"; then
+        print_check "Using Dolby Vision encoding strategy"
+        source "${SCRIPT_DIR}/encode_strategies/dolby_vision.sh"
     else
-        HWACCEL_OPTS=""
+        print_check "Using chunked encoding strategy"
+        source "${SCRIPT_DIR}/encode_strategies/chunked_encoding.sh"
     fi
     
-    # Configure audio options
-    setup_audio_options "$input_file"
+    # Check if strategy can handle this input
+    if ! can_handle "$input_file"; then
+        error "Selected strategy cannot handle this input file"
+        return 1
+    fi
     
-    # Configure subtitle options
-    setup_subtitle_options "$input_file"
+    # Initialize encoding
+    if ! initialize_encoding "$input_file" "$output_file"; then
+        error "Failed to initialize encoding"
+        return 1
+    fi
     
-    # Configure video options
-    VIDEO_OPTS=$(setup_video_options "$input_file")
+    # Prepare video
+    if ! prepare_video "$input_file" "$output_file"; then
+        error "Failed to prepare video"
+        return 1
+    fi
     
-    # Run the encoding
-    run_encoding "$input_file" "$output_file"
+    # Encode video
+    if ! encode_video "$input_file" "$output_file"; then
+        error "Failed to encode video"
+        return 1
+    fi
+    
+    # Finalize encoding
+    if ! finalize_encoding "$input_file" "$output_file"; then
+        error "Failed to finalize encoding"
+        return 1
+    fi
+    
+    print_success "Video processing completed successfully"
+    return 0
 }
