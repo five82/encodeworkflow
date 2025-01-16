@@ -17,12 +17,14 @@ create_encoding_job() {
     local output_file="$2"
     local strategy="$3"
     
-    python3 -c "
+    local job_id
+    job_id=$(PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
-state = EncodingState('${TEMP_DATA_DIR}')
-job_id = state.create_job('${input_file}', '${output_file}', '${strategy}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+job_id = state.create_job(\"${input_file}\", \"${output_file}\", \"${strategy}\")
 print(job_id)
-"
+")
+    echo "$job_id"
 }
 
 # Add a new segment to a job
@@ -41,10 +43,10 @@ add_segment() {
     local start_time="${5:-0.0}"
     local duration="${6:-0.0}"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
-state = EncodingState('${TEMP_DATA_DIR}')
-state.add_segment('${job_id}', ${index}, '${input_path}', '${output_path}', ${start_time}, ${duration})
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.add_segment(\"${job_id}\", ${index}, \"${input_path}\", \"${output_path}\", ${start_time}, ${duration})
 "
 }
 
@@ -61,16 +63,16 @@ update_segment_status() {
     local error_msg="$4"
     
     if [[ -n "$error_msg" ]]; then
-        python3 -c "
+        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, SegmentStatus
-state = EncodingState('${TEMP_DATA_DIR}')
-state.update_segment_status('${job_id}', ${index}, SegmentStatus('${status}'), '${error_msg}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.update_segment_status(\"${job_id}\", ${index}, SegmentStatus(\"${status}\"), \"${error_msg}\")
 "
     else
-        python3 -c "
+        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, SegmentStatus
-state = EncodingState('${TEMP_DATA_DIR}')
-state.update_segment_status('${job_id}', ${index}, SegmentStatus('${status}'))
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.update_segment_status(\"${job_id}\", ${index}, SegmentStatus(\"${status}\"))
 "
     fi
 }
@@ -81,11 +83,11 @@ state.update_segment_status('${job_id}', ${index}, SegmentStatus('${status}'))
 get_segments() {
     local job_id="$1"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
-state = EncodingState('${TEMP_DATA_DIR}')
-segments = state.get_segments('${job_id}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+segments = state.get_segments(\"${job_id}\")
 print(json.dumps([s.__dict__ for s in segments], default=str))
 "
 }
@@ -98,11 +100,11 @@ get_segment() {
     local job_id="$1"
     local index="$2"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
-state = EncodingState('${TEMP_DATA_DIR}')
-segment = state.get_segment('${job_id}', ${index})
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+segment = state.get_segment(\"${job_id}\", ${index})
 print(json.dumps(segment.__dict__, default=str))
 "
 }
@@ -118,16 +120,16 @@ update_job_status() {
     local error_msg="$3"
     
     if [[ -n "$error_msg" ]]; then
-        python3 -c "
+        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, JobStatus
-state = EncodingState('${TEMP_DATA_DIR}')
-state.update_job_status('${job_id}', JobStatus('${status}'), '${error_msg}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.update_job_status(\"${job_id}\", JobStatus(\"${status}\"), \"${error_msg}\")
 "
     else
-        python3 -c "
+        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, JobStatus
-state = EncodingState('${TEMP_DATA_DIR}')
-state.update_job_status('${job_id}', JobStatus('${status}'))
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.update_job_status(\"${job_id}\", JobStatus(\"${status}\"))
 "
     fi
 }
@@ -144,11 +146,11 @@ update_job_stats() {
     local output_size="$3"
     local vmaf_score="$4"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
-state = EncodingState('${TEMP_DATA_DIR}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_job_stats(
-    '${job_id}',
+    \"${job_id}\",
     input_size=${input_size},
     output_size=${output_size},
     vmaf_score=${vmaf_score}
@@ -162,21 +164,21 @@ state.update_job_stats(
 get_job_info() {
     local job_id="$1"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
-state = EncodingState('${TEMP_DATA_DIR}')
-job = state.get_job('${job_id}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+job = state.get_job(\"${job_id}\")
 print(json.dumps(job.__dict__, default=str))
 "
 }
 
 # Get all jobs information
 get_all_jobs() {
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
-state = EncodingState('${TEMP_DATA_DIR}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
 jobs = state.get_all_jobs()
 print(json.dumps([job.__dict__ for job in jobs], default=str))
 "
@@ -194,10 +196,10 @@ update_job_progress() {
     local total_frames="$3"
     local fps="${4:-0.0}"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
-state = EncodingState('${TEMP_DATA_DIR}')
-state.update_job_progress('${job_id}', ${current_frame}, ${total_frames}, ${fps})
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.update_job_progress(\"${job_id}\", ${current_frame}, ${total_frames}, ${fps})
 "
 }
 
@@ -215,10 +217,10 @@ update_segment_progress() {
     local total_frames="$4"
     local fps="${5:-0.0}"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
-state = EncodingState('${TEMP_DATA_DIR}')
-state.update_segment_progress('${job_id}', ${index}, ${current_frame}, ${total_frames}, ${fps})
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+state.update_segment_progress(\"${job_id}\", ${index}, ${current_frame}, ${total_frames}, ${fps})
 "
 }
 
@@ -228,11 +230,11 @@ state.update_segment_progress('${job_id}', ${index}, ${current_frame}, ${total_f
 get_job_progress() {
     local job_id="$1"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
-state = EncodingState('${TEMP_DATA_DIR}')
-progress = state.get_progress('${job_id}')
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+progress = state.get_progress(\"${job_id}\")
 print(json.dumps(progress.__dict__, default=str))
 "
 }
@@ -245,11 +247,11 @@ get_segment_progress() {
     local job_id="$1"
     local index="$2"
     
-    python3 -c "
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
-state = EncodingState('${TEMP_DATA_DIR}')
-progress = state.get_segment_progress('${job_id}', ${index})
+state = EncodingState(\"${TEMP_DATA_DIR}\")
+progress = state.get_segment_progress(\"${job_id}\", ${index})
 print(json.dumps(progress.__dict__, default=str))
 "
 }

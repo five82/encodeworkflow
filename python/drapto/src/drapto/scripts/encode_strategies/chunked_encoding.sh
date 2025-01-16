@@ -23,22 +23,42 @@ initialize_encoding() {
     print_check "Initializing chunked encoding strategy..."
     
     # Create required directories
-    mkdir -p "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$WORKING_DIR"
+    mkdir -p "${TEMP_DATA_DIR}"
+
+    # Create a temporary Python script to create the encoding job
+    local tmp_script
+    tmp_script=$(mktemp)
+    cat > "$tmp_script" << 'EOF'
+from drapto.scripts.common.encoding_state import EncodingState
+import sys
+
+temp_dir = sys.argv[1]
+input_file = sys.argv[2]
+output_file = sys.argv[3]
+
+state = EncodingState(temp_dir)
+job_id = state.create_job(input_file, output_file, "chunked")
+print(job_id)
+EOF
     
-    # Create encoding job and store job ID
-    JOB_ID=$(create_encoding_job "$input_file" "$output_file" "chunked")
-    if [[ -z "$JOB_ID" ]]; then
+    # Run the Python script
+    local job_id
+    job_id=$(PYTHONPATH=/home/ken/projects/encodeworkflow/python/drapto/src python3 "$tmp_script" "${TEMP_DATA_DIR}" "${input_file}" "${output_file}")
+    local status=$?
+
+    # Clean up temporary script
+    rm "$tmp_script"
+
+    # Check if job creation was successful
+    if [[ $status -ne 0 ]]; then
         error "Failed to create encoding job"
         return 1
     fi
-    export JOB_ID
-    
-    # Export variables needed by parallel encoding
-    export PRESET
-    export VMAF_SAMPLE_COUNT
-    export VMAF_SAMPLE_LENGTH
-    
-    print_success "Created encoding job: $JOB_ID"
+
+    # Export job ID for other functions to use
+    export JOB_ID="$job_id"
+    print_check "Created encoding job: $job_id"
+
     return 0
 }
 
@@ -51,6 +71,7 @@ prepare_video() {
     local input_file="$1"
     local output_file="$2"
     
+    echo "DEBUG: prepare_video called with: input='$input_file', output='$output_file'"
     print_check "Preparing video for chunked encoding..."
     
     # Segment the video
@@ -159,7 +180,7 @@ segment_video() {
     print_check "Segmenting video..."
     local input_file="$1"
     local output_dir="$2"
-
+    
     mkdir -p "$output_dir"
 
     "${FFMPEG}" -hide_banner -loglevel error -i "$input_file" \
@@ -169,6 +190,16 @@ segment_video() {
         -segment_time "$SEGMENT_LENGTH" \
         -reset_timestamps 1 \
         "${output_dir}/%04d.mkv"
+
+    # Add first segment to job tracking as a test
+    local first_segment="${output_dir}/0000.mkv"
+    if [[ -f "$first_segment" ]]; then
+        print_check "Adding first segment to job tracking..."
+        if ! add_segment "$JOB_ID" "0" "$first_segment" "" "0.0" "0.0"; then
+            error "Failed to add segment to job tracking"
+            return 1
+        fi
+    fi
 
     validate_segments "$output_dir"
 }
@@ -315,10 +346,6 @@ concatenate_segments() {
     # Ensure directories exist
     mkdir -p "${WORKING_DIR}" "${ENCODED_SEGMENTS_DIR}"
 
-    # Debug: show contents of encoded segments directory
-    echo "Debug: Contents of ${ENCODED_SEGMENTS_DIR}:"
-    ls -l "${ENCODED_SEGMENTS_DIR}" || echo "Failed to list directory"
-
     # Create concat file with proper format
     > "$concat_file"
     
@@ -328,25 +355,23 @@ concatenate_segments() {
         return 1
     fi
 
+    # Add each segment to the concat file
     for segment in "${ENCODED_SEGMENTS_DIR}"/*.mkv; do
         if [[ -f "$segment" ]]; then
-            echo "Debug: Adding segment: $segment"
             echo "file '$(realpath "$segment")'" >> "$concat_file"
         fi
     done
 
     if [[ ! -s "$concat_file" ]]; then
         error "No segments found to concatenate"
-        echo "Debug: concat.txt is empty or missing"
         return 1
     fi
-
-    echo "Debug: Contents of concat.txt:"
-    cat "$concat_file"
 
     # Concatenate video segments directly to output file
     if ! "$FFMPEG" -hide_banner -loglevel error -f concat -safe 0 -i "$concat_file" -c copy "$output_file"; then
         error "Failed to concatenate video segments"
         return 1
     fi
+
+    return 0
 }

@@ -94,6 +94,9 @@ process_file() {
     local num_audio_tracks
     num_audio_tracks=$("${FFPROBE}" -v error -select_streams a -show_entries stream=index -of csv=p=0 "$input_file" | wc -l)
 
+    # Load the appropriate encoding strategy based on content type
+    load_encoding_strategy
+
     # Process based on content type and chunked encoding setting
     if [[ "$IS_DOLBY_VISION" == true ]]; then
         print_check "Processing Dolby Vision content..."
@@ -105,7 +108,14 @@ process_file() {
         crop_filter=$(detect_crop "$input_file" "$DISABLE_CROP")
 
         # Create temporary directories
-        cleanup_temp_files
+        mkdir -p "$TEMP_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$WORKING_DIR"
+
+        # Initialize chunked encoding
+        if ! initialize_encoding "$input_file" "$output_file"; then
+            error "Failed to initialize chunked encoding"
+            cleanup_temp_files
+            return 1
+        fi
 
         # Step 1: Segment video
         segment_video "$input_file" "$SEGMENTS_DIR"
@@ -427,6 +437,15 @@ calculate_reduction() {
     awk "BEGIN {printf \"%.2f\", (($input_size - $output_size) / $input_size) * 100}"
 }
 
+# Load the appropriate encoding strategy based on content type
+load_encoding_strategy() {
+    if [[ "$IS_DOLBY_VISION" == true ]]; then
+        source "${SCRIPT_DIR}/encode_strategies/dolby_vision.sh"
+    else
+        source "${SCRIPT_DIR}/encode_strategies/chunked_encoding.sh"
+    fi
+}
+
 # Initialize array storage
 TEMP_DATA_DIR="${TEMP_DIR}/encode_data"
 mkdir -p "${TEMP_DATA_DIR}"
@@ -444,6 +463,15 @@ main() {
     fi
 
     initialize_directories
+
+    # Check for local ffmpeg/ffprobe
+    if [[ -f "$HOME/ffmpeg/ffmpeg" ]] && [[ -f "$HOME/ffmpeg/ffprobe" ]]; then
+        echo "Using local ffmpeg/ffprobe from $HOME/ffmpeg/"
+    else
+        echo "Local ffmpeg/ffprobe not found in $HOME/ffmpeg/"
+        echo "Using system ffmpeg: $FFMPEG"
+        echo "Using system ffprobe: $FFPROBE"
+    fi
 
     # Start total timing
     local total_start_time
@@ -498,14 +526,7 @@ process_video() {
     echo "Processing: $(basename "$input_file")"
     
     # Select encoding strategy based on input file
-    local strategy
-    if detect_dolby_vision "$input_file"; then
-        print_check "Using Dolby Vision encoding strategy"
-        source "${SCRIPT_DIR}/encode_strategies/dolby_vision.sh"
-    else
-        print_check "Using chunked encoding strategy"
-        source "${SCRIPT_DIR}/encode_strategies/chunked_encoding.sh"
-    fi
+    load_encoding_strategy
     
     # Check if strategy can handle this input
     if ! can_handle "$input_file"; then

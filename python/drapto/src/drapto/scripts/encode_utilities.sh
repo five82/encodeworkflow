@@ -6,36 +6,12 @@
 
 # Check for required dependencies
 check_dependencies() {
-    local use_local=false
-    local use_system=false
-
-    # Check local ffmpeg/ffprobe
-    if [ -x "$FFMPEG" ] && [ -x "$FFPROBE" ]; then
-        use_local=true
-    else
-        # If local is not available, check system ffmpeg and ffprobe
-        if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
-            use_system=true
-        else
-            echo "Error: Neither local ffmpeg/ffprobe nor system ffmpeg/ffprobe found."
-            echo "Please install ffmpeg and ffprobe on your system or run build_ffmpeg.sh."
-            return 1
-        fi
-    fi
-
-    # If using local binaries
-    if [ "$use_local" = true ]; then
-        echo "Using local ffmpeg binary: ${FFMPEG}"
-        echo "Using local ffprobe binary: ${FFPROBE}"
-    fi
-
-    # If using system binaries, update variables
-    if [ "$use_system" = true ]; then
-        FFMPEG="ffmpeg"
-        FFPROBE="ffprobe"
-        echo "Local ffmpeg/ffprobe not found."
-        echo "Using system ffmpeg: $(command -v ffmpeg)"
-        echo "Using system ffprobe: $(command -v ffprobe)"
+    # Check that ffmpeg/ffprobe exist and are executable
+    if [ ! -x "$FFMPEG" ] || [ ! -x "$FFPROBE" ]; then
+        echo "Error: ffmpeg/ffprobe not found or not executable at:"
+        echo "FFMPEG=$FFMPEG"
+        echo "FFPROBE=$FFPROBE"
+        return 1
     fi
 
     # Check for other dependencies: mediainfo and bc

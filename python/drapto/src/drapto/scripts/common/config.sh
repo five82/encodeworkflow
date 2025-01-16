@@ -5,8 +5,16 @@
 ###################
 
 # Paths (assumes SCRIPT_DIR is set before sourcing this file)
-FFMPEG="${SCRIPT_DIR}/ffmpeg"
-FFPROBE="${SCRIPT_DIR}/ffprobe"
+
+# Check for local ffmpeg/ffprobe first
+if [[ -f "$HOME/ffmpeg/ffmpeg" ]] && [[ -f "$HOME/ffmpeg/ffprobe" ]]; then
+    FFMPEG="$HOME/ffmpeg/ffmpeg"
+    FFPROBE="$HOME/ffmpeg/ffprobe"
+else
+    # Fall back to system ffmpeg/ffprobe
+    FFMPEG="/home/linuxbrew/.linuxbrew/bin/ffmpeg"
+    FFPROBE="/home/linuxbrew/.linuxbrew/bin/ffprobe"
+fi
 
 # Default paths if not set by environment
 INPUT_DIR="${INPUT_DIR:-${SCRIPT_DIR}/videos/input}"
