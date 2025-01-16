@@ -25,6 +25,88 @@ print(job_id)
 "
 }
 
+# Add a new segment to a job
+# Args:
+#   $1: Job ID
+#   $2: Segment index
+#   $3: Input segment path
+#   $4: Output segment path
+#   $5: Start time (optional)
+#   $6: Duration (optional)
+add_segment() {
+    local job_id="$1"
+    local index="$2"
+    local input_path="$3"
+    local output_path="$4"
+    local start_time="${5:-0.0}"
+    local duration="${6:-0.0}"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+state = EncodingState('${TEMP_DATA_DIR}')
+state.add_segment('${job_id}', ${index}, '${input_path}', '${output_path}', ${start_time}, ${duration})
+"
+}
+
+# Update segment status
+# Args:
+#   $1: Job ID
+#   $2: Segment index
+#   $3: Status (pending, encoding, completed, failed)
+#   $4: Error message (optional)
+update_segment_status() {
+    local job_id="$1"
+    local index="$2"
+    local status="$3"
+    local error_msg="$4"
+    
+    if [[ -n "$error_msg" ]]; then
+        python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState, SegmentStatus
+state = EncodingState('${TEMP_DATA_DIR}')
+state.update_segment_status('${job_id}', ${index}, SegmentStatus('${status}'), '${error_msg}')
+"
+    else
+        python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState, SegmentStatus
+state = EncodingState('${TEMP_DATA_DIR}')
+state.update_segment_status('${job_id}', ${index}, SegmentStatus('${status}'))
+"
+    fi
+}
+
+# Get all segments for a job
+# Args:
+#   $1: Job ID
+get_segments() {
+    local job_id="$1"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+import json
+state = EncodingState('${TEMP_DATA_DIR}')
+segments = state.get_segments('${job_id}')
+print(json.dumps([s.__dict__ for s in segments], default=str))
+"
+}
+
+# Get a specific segment
+# Args:
+#   $1: Job ID
+#   $2: Segment index
+get_segment() {
+    local job_id="$1"
+    local index="$2"
+    
+    python3 -c "
+from drapto.scripts.common.encoding_state import EncodingState
+import json
+state = EncodingState('${TEMP_DATA_DIR}')
+segment = state.get_segment('${job_id}', ${index})
+print(json.dumps(segment.__dict__, default=str))
+"
+}
+
 # Update job status
 # Args:
 #   $1: Job ID
