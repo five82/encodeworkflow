@@ -6,6 +6,116 @@
 
 source "${SCRIPT_DIR}/utils/formatting.sh"
 source "${SCRIPT_DIR}/common/video_utils.sh"
+source "${SCRIPT_DIR}/encode_strategies/strategy_base.sh"
+
+# Implementation of strategy interface
+
+# Initialize Dolby Vision encoding
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+initialize_encoding() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Initializing Dolby Vision encoding strategy..."
+    
+    # Create working directory
+    mkdir -p "$WORKING_DIR"
+    
+    # Check for hardware acceleration only on macOS
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        print_check "macOS detected, checking hardware acceleration..."
+        check_hardware_acceleration
+        HWACCEL_OPTS=$(configure_hw_accel_options)
+    else
+        HWACCEL_OPTS=""
+    fi
+    
+    return 0
+}
+
+# Prepare video by setting up DV options
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+prepare_video() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Preparing video for Dolby Vision encoding..."
+    
+    # Configure video options
+    VIDEO_OPTS=$(setup_video_options "$input_file" "$DISABLE_CROP")
+    if [[ $? -ne 0 ]]; then
+        error "Failed to configure video options"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Encode video with DV settings
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+encode_video() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Encoding video with Dolby Vision..."
+    
+    # Create temporary file for video track
+    local temp_video="${WORKING_DIR}/temp_video.mkv"
+    
+    # Encode video track
+    if ! "${FFMPEG}" -hide_banner -y -i "$input_file" \
+        ${HWACCEL_OPTS} \
+        ${VIDEO_OPTS} \
+        -an \
+        "$temp_video"; then
+        error "Failed to encode video track"
+        return 1
+    fi
+    
+    # Move temp file to output
+    mv "$temp_video" "$output_file"
+    
+    return 0
+}
+
+# Finalize encoding process
+# Args:
+#   $1: Input file path
+#   $2: Output file path
+#   $3: Options string (optional)
+finalize_encoding() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    print_check "Finalizing Dolby Vision encoding..."
+    
+    # Cleanup temporary files
+    cleanup_temp_files
+    
+    return 0
+}
+
+# Check if this strategy can handle the input
+# Args:
+#   $1: Input file path
+can_handle() {
+    local input_file="$1"
+    
+    # Only handle Dolby Vision content
+    if detect_dolby_vision "$input_file"; then
+        return 0
+    fi
+    return 1
+}
 
 # Get video encoding options based on input file analysis
 get_video_encode_options() {
