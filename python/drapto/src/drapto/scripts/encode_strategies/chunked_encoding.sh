@@ -11,6 +11,38 @@ source "${SCRIPT_DIR}/common/state_management.sh"
 # Chunked Encoding Strategy
 ###################
 
+# Initialize working directories
+# Args:
+#   $1: Output file path
+initialize_working_dirs() {
+    local output_file="$1"
+    
+    # Set up working directories as subdirectories of output location
+    export WORKING_DIR="${output_file}_work"
+    export SEGMENTS_DIR="${WORKING_DIR}/segments"
+    export ENCODED_SEGMENTS_DIR="${WORKING_DIR}/encoded"
+    export TEMP_DATA_DIR="${WORKING_DIR}/data"
+
+    print_check "Setting up working directories..."
+
+    # Clean up old directories if they exist
+    if [[ -d "$WORKING_DIR" ]]; then
+        print_check "Cleaning up old working directory..."
+        rm -rf "$WORKING_DIR"
+    fi
+
+    # Create fresh directories
+    for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
+        mkdir -p "$dir" || {
+            error "Failed to create directory: $dir"
+            return 1
+        }
+    done
+
+    print_success "Working directories initialized"
+    return 0
+}
+
 # Initialize chunked encoding
 # Args:
 #   $1: Input file path
@@ -22,19 +54,11 @@ initialize_encoding() {
     
     print_check "Initializing chunked encoding strategy..."
     
-    # Set up working directories as subdirectories of output location
-    export WORKING_DIR="${output_file}_work"
-    export SEGMENTS_DIR="${WORKING_DIR}/segments"
-    export ENCODED_SEGMENTS_DIR="${WORKING_DIR}/encoded"
-    export TEMP_DATA_DIR="${WORKING_DIR}/data"
-
-    # Create required directories
-    for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
-        mkdir -p "$dir" || {
-            error "Failed to create directory: $dir"
-            return 1
-        }
-    done
+    # Initialize working directories
+    if ! initialize_working_dirs "$output_file"; then
+        error "Failed to initialize working directories"
+        return 1
+    fi
 
     # Create a temporary Python script to create the encoding job
     local tmp_script
@@ -449,3 +473,75 @@ cleanup_on_error() {
 
     print_success "Cleanup completed"
 }
+
+# Test directory initialization
+# Args:
+#   None
+test_initialize_working_dirs() {
+    print_check "Testing working directory initialization..."
+    
+    # Create a test output file path
+    local test_output="/tmp/test_encode_output.mkv"
+    
+    # First initialization should succeed
+    if ! initialize_working_dirs "$test_output"; then
+        error "First initialization failed"
+        return 1
+    fi
+
+    # Verify all directories exist
+    local all_dirs_exist=true
+    for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
+        if [[ ! -d "$dir" ]]; then
+            error "Directory not created: $dir"
+            all_dirs_exist=false
+        fi
+    done
+
+    if [[ "$all_dirs_exist" != "true" ]]; then
+        return 1
+    fi
+
+    # Create a test file in working directory
+    local test_file="${WORKING_DIR}/test_file.txt"
+    echo "test" > "$test_file"
+
+    # Second initialization should succeed and clean up old files
+    if ! initialize_working_dirs "$test_output"; then
+        error "Second initialization failed"
+        return 1
+    fi
+
+    # Verify test file was cleaned up
+    if [[ -f "$test_file" ]]; then
+        error "Old files not cleaned up"
+        return 1
+    fi
+
+    # Verify all directories exist again
+    all_dirs_exist=true
+    for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
+        if [[ ! -d "$dir" ]]; then
+            error "Directory not recreated: $dir"
+            all_dirs_exist=false
+        fi
+    done
+
+    if [[ "$all_dirs_exist" != "true" ]]; then
+        return 1
+    fi
+
+    # Clean up test directories
+    rm -rf "$WORKING_DIR"
+
+    print_success "Directory initialization tests passed"
+    return 0
+}
+
+# Run tests if TEST_MODE is enabled
+if [[ "${TEST_MODE:-false}" == "true" ]]; then
+    if ! test_initialize_working_dirs; then
+        error "Directory initialization tests failed"
+        exit 1
+    fi
+fi
