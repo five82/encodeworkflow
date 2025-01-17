@@ -337,12 +337,7 @@ encode_segments() {
         
         # Get encoding status and attempts
         local encoding_data
-        encoding_data=$(python3 -c "import json
-with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
-    data = json.load(f)
-segment = data['segments'].get('${segment_index}', {})
-print(f'{segment.get(\"attempts\", 0)}\n{segment.get(\"last_strategy\", \"\")}')
-")
+        encoding_data=$(PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" get_segment_data "${TEMP_DATA_DIR}/encoding.json" "${segment_index}")
         local attempts=$(echo "$encoding_data" | head -n1)
         local last_strategy=$(echo "$encoding_data" | tail -n1)
         
@@ -723,23 +718,27 @@ test_initialize_working_dirs() {
 initialize_tracking_files() {
     print_check "Initializing tracking files..."
 
-    # Create initial segments.json
-    cat > "${TEMP_DATA_DIR}/segments.json" << 'EOF'
+    local current_time
+    current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    # Create initial segments.json with proper permissions
+    cat > "${TEMP_DATA_DIR}/segments.json" << EOF
 {
     "segments": [],
-    "created_at": "",
-    "updated_at": "",
+    "created_at": "${current_time}",
+    "updated_at": "${current_time}",
     "total_segments": 0,
     "total_duration": 0.0
 }
 EOF
+    chmod 664 "${TEMP_DATA_DIR}/segments.json"
 
-    # Create initial encoding.json
-    cat > "${TEMP_DATA_DIR}/encoding.json" << 'EOF'
+    # Create initial encoding.json with proper permissions
+    cat > "${TEMP_DATA_DIR}/encoding.json" << EOF
 {
     "segments": {},
-    "created_at": "",
-    "updated_at": "",
+    "created_at": "${current_time}",
+    "updated_at": "${current_time}",
     "total_attempts": 0,
     "failed_segments": 0,
     "max_attempts": 3,
@@ -766,19 +765,21 @@ EOF
     ]
 }
 EOF
+    chmod 664 "${TEMP_DATA_DIR}/encoding.json"
 
-    # Create initial progress.json
-    cat > "${TEMP_DATA_DIR}/progress.json" << 'EOF'
+    # Create initial progress.json with proper permissions
+    cat > "${TEMP_DATA_DIR}/progress.json" << EOF
 {
     "status": "initializing",
-    "created_at": "",
-    "updated_at": "",
+    "created_at": "${current_time}",
+    "updated_at": "${current_time}",
     "total_progress": 0.0,
     "segments_completed": 0,
     "segments_failed": 0,
     "current_segment": null
 }
 EOF
+    chmod 664 "${TEMP_DATA_DIR}/progress.json"
 
     # Update timestamps
     update_tracking_timestamps
@@ -795,24 +796,7 @@ update_tracking_timestamps() {
     current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
     # Update segments.json timestamps
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
-import json, sys
-from datetime import datetime
-
-def update_timestamps(file_path):
-    with open(file_path, 'r') as f:
-        data = json.load(f)
-    
-    if not data.get('created_at'):
-        data['created_at'] = '${current_time}'
-    data['updated_at'] = '${current_time}'
-    
-    with open(file_path, 'w') as f:
-        json.dump(data, f, indent=4)
-
-for file in ['segments.json', 'encoding.json', 'progress.json']:
-    update_timestamps('${TEMP_DATA_DIR}/' + file)
-"
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" update_timestamps "${TEMP_DATA_DIR}" "${current_time}"
 }
 
 # Add segment to tracking
@@ -886,59 +870,7 @@ update_segment_encoding_status() {
     local error="${3:-}"
     local strategy="${4:-}"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
-import json
-from datetime import datetime
-
-# Update encoding.json
-with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
-    data = json.load(f)
-
-segment = data['segments'].get(str(${index}))
-if not segment:
-    segment = {
-        'status': '${status}',
-        'attempts': 0,
-        'strategies_tried': [],
-        'last_strategy': None,
-        'error': None
-    }
-    data['segments'][str(${index})] = segment
-
-segment['status'] = '${status}'
-if '${strategy}':
-    if 'strategies_tried' not in segment:
-        segment['strategies_tried'] = []
-    if '${strategy}' not in segment['strategies_tried']:
-        segment['strategies_tried'].append('${strategy}')
-        segment['attempts'] = len(segment['strategies_tried'])
-    segment['last_strategy'] = '${strategy}'
-
-if '${error}':
-    segment['error'] = '${error}'
-else:
-    segment['error'] = None
-
-data['total_attempts'] += 1
-if '${status}' == 'failed':
-    data['failed_segments'] += 1
-
-with open('${TEMP_DATA_DIR}/encoding.json', 'w') as f:
-    json.dump(data, f, indent=4)
-
-# Update progress.json
-with open('${TEMP_DATA_DIR}/progress.json', 'r') as f:
-    progress = json.load(f)
-
-progress['current_segment'] = int('${index}')
-if '${status}' == 'completed':
-    progress['segments_completed'] += 1
-elif '${status}' == 'failed':
-    progress['segments_failed'] += 1
-
-with open('${TEMP_DATA_DIR}/progress.json', 'w') as f:
-    json.dump(progress, f, indent=4)
-"
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" update_segment_status "${TEMP_DATA_DIR}/encoding.json" "${index}" "${status}" "${error}" "${strategy}"
     
     # Update timestamps
     update_tracking_timestamps
