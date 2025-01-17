@@ -22,8 +22,19 @@ initialize_encoding() {
     
     print_check "Initializing chunked encoding strategy..."
     
+    # Set up working directories as subdirectories of output location
+    export WORKING_DIR="${output_file}_work"
+    export SEGMENTS_DIR="${WORKING_DIR}/segments"
+    export ENCODED_SEGMENTS_DIR="${WORKING_DIR}/encoded"
+    export TEMP_DATA_DIR="${WORKING_DIR}/data"
+
     # Create required directories
-    mkdir -p "${TEMP_DATA_DIR}"
+    for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
+        mkdir -p "$dir" || {
+            error "Failed to create directory: $dir"
+            return 1
+        }
+    done
 
     # Create a temporary Python script to create the encoding job
     local tmp_script
@@ -404,4 +415,37 @@ concatenate_segments() {
     fi
 
     return 0
+}
+
+# Cleanup after an error occurs
+# Args:
+#   $1: Job ID
+#   $2: Output directory
+#   $3: Error message (optional)
+cleanup_on_error() {
+    local job_id="$1"
+    local output_dir="$2"
+    local error_msg="${3:-Encoding failed}"
+
+    print_check "Starting cleanup after error: $error_msg"
+
+    # Update job status to failed
+    update_job_status "$job_id" "failed" "$error_msg"
+
+    # Only attempt cleanup if output directory exists
+    if [[ -d "$output_dir" ]]; then
+        # Clean up all subdirectories
+        for subdir in "segments" "encoded" "data"; do
+            if [[ -d "${output_dir}/${subdir}" ]]; then
+                rm -rf "${output_dir}/${subdir}"
+            fi
+        done
+
+        # Try to remove the working directory itself
+        rmdir "$output_dir" 2>/dev/null || {
+            print_warning "Could not remove working directory - it may contain other files"
+        }
+    fi
+
+    print_success "Cleanup completed"
 }
