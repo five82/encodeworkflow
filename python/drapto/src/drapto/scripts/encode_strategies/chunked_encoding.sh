@@ -498,32 +498,159 @@ concatenate_segments() {
 #   $1: Job ID
 #   $2: Output directory
 #   $3: Error message (optional)
+# Cleanup after an error occurs
+# Args:
+#   $1: Job ID
+#   $2: Output directory
+#   $3: Error message (optional)
+#   $4: Stage (optional) - The stage where error occurred (segment, encode, concat)
+#   $5: Segment index (optional) - The segment being processed when error occurred
 cleanup_on_error() {
     local job_id="$1"
     local output_dir="$2"
     local error_msg="${3:-Encoding failed}"
+    local stage="${4:-unknown}"
+    local segment_index="${5:-}"
 
-    print_check "Starting cleanup after error: $error_msg"
+    print_check "Starting cleanup after error in ${stage} stage: $error_msg"
+    print_check "Output directory: $output_dir"
+    
+    # Ensure WORKING_DIR is set
+    WORKING_DIR="$output_dir"
+    DATA_DIR="${WORKING_DIR}/data"
+    print_check "Creating data directory: $DATA_DIR"
+    mkdir -p "$DATA_DIR"
+    ls -la "$DATA_DIR"
+    
+    # Create cleanup state file in temporary location
+    local cleanup_state_file="${CLEANUP_STATE_DIR:-${DATA_DIR}}/cleanup_state.json"
+    print_check "Creating cleanup state file: $cleanup_state_file"
+    echo '{"job_id": "'$job_id'", "stage": "'$stage'", "error": "'$error_msg'", "started_at": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'", "completed_steps": [], "failed_steps": [], "segment_index": '${segment_index:-null}'}' > "$cleanup_state_file"
+    ls -la "$cleanup_state_file"
 
-    # Update job status to failed
-    update_job_status "$job_id" "failed" "$error_msg"
+
+
+    # Function to update cleanup state
+    update_cleanup_state() {
+        local step="$1"
+        local status="$2" # success or failed
+        local state_file="$cleanup_state_file"
+
+        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json, os
+
+# Create state file if it doesn't exist
+if not os.path.exists('$state_file'):
+    state = {
+        'job_id': '$job_id',
+        'stage': '$stage',
+        'error': '$error_msg',
+        'started_at': '$(date -u +"%Y-%m-%dT%H:%M:%SZ")',
+        'completed_steps': [],
+        'failed_steps': [],
+        'segment_index': ${segment_index:-None}
+    }
+else:
+    with open('$state_file', 'r') as f:
+        state = json.load(f)
+
+if '$status' == 'success':
+    if 'completed_steps' not in state:
+        state['completed_steps'] = []
+    state['completed_steps'].append('$step')
+else:
+    if 'failed_steps' not in state:
+        state['failed_steps'] = []
+    state['failed_steps'].append('$step')
+
+with open('$state_file', 'w') as f:
+    json.dump(state, f, indent=4)
+"
+    }
+
+    # Update job status to failed with detailed error info
+    if ! update_job_status "$job_id" "failed" "[$stage] $error_msg" 2>/dev/null; then
+        print_warning "Could not update job status - job may not exist"
+    fi
+    # Always mark status update as completed since we handled the error
+    update_cleanup_state "update_status" "success"
+
+    # Update encoding status if we have segment info
+    if [[ -n "$segment_index" ]]; then
+        update_segment_encoding_status "$segment_index" "failed" "$error_msg" "cleanup"
+        update_cleanup_state "update_segment_status" "success"
+    fi
 
     # Only attempt cleanup if output directory exists
     if [[ -d "$output_dir" ]]; then
-        # Clean up all subdirectories
-        for subdir in "segments" "encoded" "data"; do
-            if [[ -d "${output_dir}/${subdir}" ]]; then
-                rm -rf "${output_dir}/${subdir}"
+        # Clean up temporary encode files first
+        local temp_files=("${output_dir}"/*.temp.* "${output_dir}"/*.log "${output_dir}"/*.stats)
+        for temp_file in "${temp_files[@]}"; do
+            if [[ -f "$temp_file" ]]; then
+                rm -f "$temp_file" && \
+                    update_cleanup_state "remove_temp_file:$(basename "$temp_file")" "success" || \
+                    update_cleanup_state "remove_temp_file:$(basename "$temp_file")" "failed"
             fi
         done
 
-        # Try to remove the working directory itself
-        rmdir "$output_dir" 2>/dev/null || {
-            print_warning "Could not remove working directory - it may contain other files"
-        }
+        # Clean up all subdirectories except data (which contains our state)
+        for subdir in "segments" "encoded"; do
+            if [[ -d "${output_dir}/${subdir}" ]]; then
+                # If this is the segments directory and we're in encode stage,
+                # preserve the original segments
+                if [[ "$subdir" == "segments" ]] && [[ "$stage" == "encode" ]]; then
+                    update_cleanup_state "preserve_segments" "success"
+                    continue
+                fi
+
+                rm -rf "${output_dir}/${subdir}" && \
+                    update_cleanup_state "remove_dir:${subdir}" "success" || \
+                    update_cleanup_state "remove_dir:${subdir}" "failed"
+            fi
+        done
+
+        # Now clean up data directory except cleanup state file
+        if [[ -d "${output_dir}/data" ]]; then
+            # Move cleanup state file to temp location
+            mv "${cleanup_state_file}" "${cleanup_state_file}.tmp"
+            
+            # Remove data directory
+            rm -rf "${output_dir}/data" && \
+                update_cleanup_state "remove_dir:data" "success" || \
+                update_cleanup_state "remove_dir:data" "failed"
+            
+            # Restore cleanup state file
+            mkdir -p "$(dirname "${cleanup_state_file}")"
+            mv "${cleanup_state_file}.tmp" "${cleanup_state_file}"
+        fi
+
+        # Try to remove the working directory itself if empty and not preserving segments
+        if [[ "$stage" != "encode" ]]; then
+            # Remove all contents first
+            rm -rf "${output_dir}"/* && \
+                update_cleanup_state "remove_contents" "success" || \
+                update_cleanup_state "remove_contents" "failed"
+            
+            # Then remove the directory itself
+            rmdir "$output_dir" 2>/dev/null && \
+                update_cleanup_state "remove_working_dir" "success" || \
+                update_cleanup_state "remove_working_dir" "failed"
+        fi
     fi
 
-    print_success "Cleanup completed"
+    # Update cleanup state with completion
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+from datetime import datetime
+with open('$cleanup_state_file', 'r') as f:
+    state = json.load(f)
+state['completed_at'] = '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
+with open('$cleanup_state_file', 'w') as f:
+    json.dump(state, f, indent=4)
+"
+
+    print_success "Cleanup completed. See $cleanup_state_file for details."
+    return 0
 }
 
 # Test directory initialization
@@ -1005,6 +1132,155 @@ if segment['status'] != 'completed':
     return 0
 }
 
+# Test cleanup functionality
+# Args:
+#   None
+test_cleanup_on_error() {
+    print_check "Testing cleanup functionality..."
+
+    # Set up test environment
+    local test_output="/tmp/test_encode_output.mkv"
+    export WORKING_DIR="${test_output}_work"
+    export DATA_DIR="${WORKING_DIR}/data"
+    print_check "Test working directory: $WORKING_DIR"
+    print_check "Test data directory: $DATA_DIR"
+    
+    # Create a temporary directory for cleanup state
+    export CLEANUP_STATE_DIR="$(mktemp -d)"
+    print_check "Temporary cleanup state directory: $CLEANUP_STATE_DIR"
+    
+    if ! initialize_working_dirs "$test_output"; then
+        print_error "Failed to set up test environment"
+        return 1
+    fi
+    
+    ls -la "$WORKING_DIR"
+
+    # Initialize tracking files and create test job
+    initialize_tracking_files
+    
+    # Create a test job in encoding.json
+    cat > "${WORKING_DIR}/data/encoding.json" << EOF
+{
+    "jobs": {
+        "test_job": {
+            "id": "test_job",
+            "input_file": "test_input.mkv",
+            "output_file": "$test_output",
+            "status": "running",
+            "started_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        }
+    },
+    "segments": {}
+}
+EOF
+
+    # Create test files and directories
+    mkdir -p "${SEGMENTS_DIR}" "${ENCODED_SEGMENTS_DIR}"
+    touch "${WORKING_DIR}/test.temp.mkv"
+    touch "${WORKING_DIR}/encode.log"
+    touch "${WORKING_DIR}/stats.json"
+    touch "${SEGMENTS_DIR}/0001.mkv"
+    touch "${SEGMENTS_DIR}/0002.mkv"
+    touch "${ENCODED_SEGMENTS_DIR}/0001.mkv"
+
+    # Test cleanup during segmentation
+    print_check "Testing cleanup during segmentation..."
+    cleanup_on_error "test_job" "$WORKING_DIR" "Segmentation failed" "segment"
+
+    # Verify cleanup state
+    print_check "Verifying cleanup state file: ${CLEANUP_STATE_DIR}/cleanup_state.json"
+    ls -la "${CLEANUP_STATE_DIR}" || true
+    if [[ ! -f "${CLEANUP_STATE_DIR}/cleanup_state.json" ]]; then
+        print_error "Cleanup state file not created"
+        return 1
+    fi
+
+    # Verify cleanup results
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+with open('${CLEANUP_STATE_DIR}/cleanup_state.json', 'r') as f:
+    state = json.load(f)
+
+# Check stage
+if state['stage'] != 'segment':
+    print('Wrong stage in cleanup state')
+    exit(1)
+
+# Check completed steps
+required_steps = ['update_status', 'remove_temp_file:test.temp.mkv',
+                 'remove_temp_file:encode.log', 'remove_temp_file:stats.json',
+                 'remove_dir:segments', 'remove_dir:encoded', 'remove_dir:data',
+                 'remove_contents', 'remove_working_dir']
+for step in required_steps:
+    if step not in state['completed_steps']:
+        print(f'Missing completed step: {step}')
+        exit(1)
+
+# Check if working directory was removed
+if len(state['failed_steps']) > 0:
+    print(f'Unexpected failed steps: {state["failed_steps"]}')
+    exit(1)
+"
+
+    # Test cleanup during encoding with segment preservation
+    print_check "Testing cleanup during encoding..."
+    
+    # Reset test environment
+    initialize_working_dirs "$test_output"
+    mkdir -p "${SEGMENTS_DIR}" "${ENCODED_SEGMENTS_DIR}"
+    touch "${WORKING_DIR}/test.temp.mkv"
+    touch "${SEGMENTS_DIR}/0001.mkv"
+    touch "${ENCODED_SEGMENTS_DIR}/0001.mkv"
+
+    # Run cleanup with segment index
+    cleanup_on_error "test_job" "$WORKING_DIR" "Encoding failed" "encode" "1"
+
+    # Verify segment preservation and status update
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+
+# Check cleanup state
+with open('${CLEANUP_STATE_DIR}/cleanup_state.json', 'r') as f:
+    state = json.load(f)
+
+# Verify segment preservation
+if 'preserve_segments' not in state['completed_steps']:
+    print('Segments not preserved')
+    exit(1)
+
+# Check encoding status
+with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
+    encoding = json.load(f)
+
+segment = encoding['segments'].get('1')
+if not segment or segment['status'] != 'failed':
+    print('Segment status not updated')
+    exit(1)
+"
+
+    # Test cleanup during concatenation
+    print_check "Testing cleanup during concatenation..."
+    
+    # Reset test environment
+    initialize_working_dirs "$test_output"
+    mkdir -p "${SEGMENTS_DIR}" "${ENCODED_SEGMENTS_DIR}"
+    touch "${WORKING_DIR}/concat.txt"
+    touch "${ENCODED_SEGMENTS_DIR}/0001.mkv"
+    touch "${ENCODED_SEGMENTS_DIR}/0002.mkv"
+
+    cleanup_on_error "test_job" "$WORKING_DIR" "Concatenation failed" "concat"
+
+    # Verify complete cleanup
+    if [[ -d "$WORKING_DIR" ]]; then
+        print_error "Working directory not removed during concat cleanup"
+        return 1
+    fi
+
+    print_success "Cleanup tests passed"
+    return 0
+}
+
 # Run tests if TEST_MODE is enabled
 if [[ "${TEST_MODE:-false}" == "true" ]]; then
     if ! test_initialize_working_dirs; then
@@ -1014,6 +1290,11 @@ if [[ "${TEST_MODE:-false}" == "true" ]]; then
     
     if ! test_tracking_files; then
         print_error "Tracking file tests failed"
+        exit 1
+    fi
+
+    if ! test_cleanup_on_error; then
+        print_error "Cleanup tests failed"
         exit 1
     fi
 fi
