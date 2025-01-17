@@ -180,9 +180,10 @@ segment_video() {
     print_check "Segmenting video..."
     local input_file="$1"
     local output_dir="$2"
-    
+
     mkdir -p "$output_dir"
 
+    # Segment the video
     "${FFMPEG}" -hide_banner -loglevel error -i "$input_file" \
         -c:v copy \
         -an \
@@ -191,15 +192,14 @@ segment_video() {
         -reset_timestamps 1 \
         "${output_dir}/%04d.mkv"
 
-    # Add first segment to job tracking as a test
-    local first_segment="${output_dir}/0000.mkv"
-    if [[ -f "$first_segment" ]]; then
-        print_check "Adding first segment to job tracking..."
-        if ! add_segment "$JOB_ID" "0" "$first_segment" "" "0.0" "0.0"; then
-            error "Failed to add segment to job tracking"
-            return 1
+    # Add segments to job tracking
+    local index=0
+    for segment in "${output_dir}"/*.mkv; do
+        if [[ -f "$segment" ]]; then
+            add_segment "$JOB_ID" "$index" "$segment" "" "0.0" "0.0"
+            ((index++))
         fi
-    fi
+    done
 
     validate_segments "$output_dir"
 }
