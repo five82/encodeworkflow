@@ -5,7 +5,7 @@ exec 1> >(stdbuf -oL cat)
 exec 2> >(stdbuf -oL cat >&2)
 
 # Add cargo bin to PATH
-export PATH="/home/ken/.cargo/bin:${PATH}"
+export PATH="$HOME/.cargo/bin:${PATH}"
 
 # Add near the top of the script, after the shebang
 export LD_LIBRARY_PATH="/home/linuxbrew/.linuxbrew/lib:${LD_LIBRARY_PATH}"

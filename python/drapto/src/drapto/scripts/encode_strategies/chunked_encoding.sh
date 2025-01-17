@@ -85,7 +85,7 @@ EOF
     
     # Run the Python script
     local job_id
-    job_id=$(PYTHONPATH=/home/ken/projects/encodeworkflow/python/drapto/src python3 "$tmp_script" "${TEMP_DATA_DIR}" "${input_file}" "${output_file}")
+    job_id=$(PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 "$tmp_script" "${TEMP_DATA_DIR}" "${input_file}" "${output_file}")
     local status=$?
 
     # Clean up temporary script
@@ -337,7 +337,7 @@ encode_segments() {
         
         # Get encoding status and attempts
         local encoding_data
-        encoding_data=$(PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" get_segment_data "${TEMP_DATA_DIR}/encoding.json" "${segment_index}")
+        encoding_data=$(PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" get_segment_data "${TEMP_DATA_DIR}/encoding.json" "${segment_index}")
         local attempts=$(echo "$encoding_data" | head -n1)
         local last_strategy=$(echo "$encoding_data" | tail -n1)
         
@@ -531,7 +531,7 @@ cleanup_on_error() {
         local status="$2" # success or failed
         local state_file="$cleanup_state_file"
 
-        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+        PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json, os
 
 # Create state file if it doesn't exist
@@ -634,7 +634,7 @@ with open('$state_file', 'w') as f:
     fi
 
     # Update cleanup state with completion
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
 from datetime import datetime
 with open('$cleanup_state_file', 'r') as f:
@@ -796,7 +796,7 @@ update_tracking_timestamps() {
     current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
     # Update segments.json timestamps
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" update_timestamps "${TEMP_DATA_DIR}" "${current_time}"
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" update_timestamps "${TEMP_DATA_DIR}" "${current_time}"
 }
 
 # Add segment to tracking
@@ -816,7 +816,7 @@ add_segment_to_tracking() {
     size=$(stat -f%z "$segment_path" 2>/dev/null || stat -c%s "$segment_path")
     
     # Add segment to segments.json
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json, os
 from datetime import datetime
 
@@ -870,7 +870,7 @@ update_segment_encoding_status() {
     local error="${3:-}"
     local strategy="${4:-}"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" update_segment_status "${TEMP_DATA_DIR}/encoding.json" "${index}" "${status}" "${error}" "${strategy}"
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 "${SCRIPT_DIR}/encode_strategies/json_helper.py" update_segment_status "${TEMP_DATA_DIR}/encoding.json" "${index}" "${status}" "${error}" "${strategy}"
     
     # Update timestamps
     update_tracking_timestamps
@@ -884,7 +884,7 @@ update_encoding_progress() {
     local status="$1"
     local progress="$2"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
 
 with open('${TEMP_DATA_DIR}/progress.json', 'r') as f:
@@ -988,7 +988,7 @@ test_tracking_files() {
     update_segment_encoding_status "1" "completed" "" "lower_vmaf"
 
     # Verify retry tracking
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
 with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
     data = json.load(f)
@@ -1009,7 +1009,7 @@ if segment['attempts'] != 3:
 "
 
     # Check final status
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
 with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
     data = json.load(f)
@@ -1129,7 +1129,7 @@ EOF
     fi
 
     # Verify cleanup results
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
 with open('${CLEANUP_STATE_DIR}/cleanup_state.json', 'r') as f:
     state = json.load(f)
@@ -1169,7 +1169,7 @@ if len(state['failed_steps']) > 0:
     cleanup_on_error "test_job" "$WORKING_DIR" "Encoding failed" "encode" "1"
 
     # Verify segment preservation and status update
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
 
 # Check cleanup state

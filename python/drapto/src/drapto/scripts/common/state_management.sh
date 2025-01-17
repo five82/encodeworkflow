@@ -18,7 +18,7 @@ create_encoding_job() {
     local strategy="$3"
     
     local job_id
-    job_id=$(PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    job_id=$(PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 job_id = state.create_job(\"${input_file}\", \"${output_file}\", \"${strategy}\")
@@ -43,7 +43,7 @@ add_segment() {
     local start_time="${5:-0.0}"
     local duration="${6:-0.0}"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.add_segment(\"${job_id}\", ${index}, \"${input_path}\", \"${output_path}\", ${start_time}, ${duration})
@@ -63,13 +63,13 @@ update_segment_status() {
     local error_msg="$4"
     
     if [[ -n "$error_msg" ]]; then
-        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+        PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, SegmentStatus
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_segment_status(\"${job_id}\", ${index}, SegmentStatus(\"${status}\"), \"${error_msg}\")
 "
     else
-        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+        PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, SegmentStatus
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_segment_status(\"${job_id}\", ${index}, SegmentStatus(\"${status}\"))
@@ -83,7 +83,7 @@ state.update_segment_status(\"${job_id}\", ${index}, SegmentStatus(\"${status}\"
 get_segments() {
     local job_id="$1"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
 state = EncodingState(\"${TEMP_DATA_DIR}\")
@@ -100,7 +100,7 @@ get_segment() {
     local job_id="$1"
     local index="$2"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
 state = EncodingState(\"${TEMP_DATA_DIR}\")
@@ -120,13 +120,13 @@ update_job_status() {
     local error_msg="$3"
     
     if [[ -n "$error_msg" ]]; then
-        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+        PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, JobStatus
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_job_status(\"${job_id}\", JobStatus(\"${status}\"), \"${error_msg}\")
 "
     else
-        PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+        PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState, JobStatus
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_job_status(\"${job_id}\", JobStatus(\"${status}\"))
@@ -146,7 +146,7 @@ update_job_stats() {
     local output_size="$3"
     local vmaf_score="$4"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_job_stats(
@@ -164,7 +164,7 @@ state.update_job_stats(
 get_job_info() {
     local job_id="$1"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
 state = EncodingState(\"${TEMP_DATA_DIR}\")
@@ -175,7 +175,7 @@ print(json.dumps(job.__dict__, default=str))
 
 # Get all jobs information
 get_all_jobs() {
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
 state = EncodingState(\"${TEMP_DATA_DIR}\")
@@ -196,7 +196,7 @@ update_job_progress() {
     local total_frames="$3"
     local fps="${4:-0.0}"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_job_progress(\"${job_id}\", ${current_frame}, ${total_frames}, ${fps})
@@ -217,7 +217,7 @@ update_segment_progress() {
     local total_frames="$4"
     local fps="${5:-0.0}"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 state = EncodingState(\"${TEMP_DATA_DIR}\")
 state.update_segment_progress(\"${job_id}\", ${index}, ${current_frame}, ${total_frames}, ${fps})
@@ -230,7 +230,7 @@ state.update_segment_progress(\"${job_id}\", ${index}, ${current_frame}, ${total
 get_job_progress() {
     local job_id="$1"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
 state = EncodingState(\"${TEMP_DATA_DIR}\")
@@ -247,7 +247,7 @@ get_segment_progress() {
     local job_id="$1"
     local index="$2"
     
-    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+    PYTHONPATH="$HOME/projects/encodeworkflow/python/drapto/src" python3 -c "
 from drapto.scripts.common.encoding_state import EncodingState
 import json
 state = EncodingState(\"${TEMP_DATA_DIR}\")
