@@ -175,6 +175,27 @@ validate_segments() {
     print_success "Successfully validated $segment_count segments"
 }
 
+# Validate a single segment file
+# Args:
+#   $1: Segment file path
+validate_single_segment() {
+    local segment_file="$1"
+
+    # Check if file exists and is readable
+    if [[ ! -f "$segment_file" ]] || [[ ! -r "$segment_file" ]]; then
+        error "Segment file does not exist or is not readable: $segment_file"
+        return 1
+    fi
+
+    # Check if file is a valid video file using ffprobe
+    if ! "$FFPROBE" -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 "$segment_file" > /dev/null 2>&1; then
+        error "Invalid video file: $segment_file"
+        return 1
+    fi
+
+    return 0
+}
+
 # Segment video into chunks
 segment_video() {
     print_check "Segmenting video..."
@@ -196,7 +217,16 @@ segment_video() {
     local index=0
     for segment in "${output_dir}"/*.mkv; do
         if [[ -f "$segment" ]]; then
-            add_segment "$JOB_ID" "$index" "$segment" "" "0.0" "0.0"
+            # Validate segment before adding
+            if ! validate_single_segment "$segment"; then
+                error "Failed to validate segment: $segment"
+                return 1
+            fi
+            
+            if ! add_segment "$JOB_ID" "$index" "$segment" "" "0.0" "0.0"; then
+                error "Failed to add segment to tracking: $segment"
+                return 1
+            fi
             ((index++))
         fi
     done
