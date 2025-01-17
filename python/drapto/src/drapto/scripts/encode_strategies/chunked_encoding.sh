@@ -333,64 +333,92 @@ encode_segments() {
         local output_segment="$2"
         local target_vmaf="$3"
         local vfilter_args="$4"
+        local segment_index=$(get_segment_index "$segment")
         
-        # First attempt with default settings
-        if ab-av1 auto-encode \
-            --input "$segment" \
-            --output "$output_segment" \
-            --encoder libsvtav1 \
-            --min-vmaf "$target_vmaf" \
-            --preset "$PRESET" \
-            --svt "tune=0:film-grain=0:film-grain-denoise=0" \
-            --keyint 10s \
-            --samples "$VMAF_SAMPLE_COUNT" \
-            --sample-duration "${VMAF_SAMPLE_LENGTH}s" \
-            --vmaf "n_subsample=8:pool=harmonic_mean" \
-            $vfilter_args \
-            --quiet; then
-            update_segment_encoding_status "$(get_segment_index "$segment")" "completed"
-            return 0
+        # Get encoding status and attempts
+        local encoding_data
+        encoding_data=$(python3 -c "import json
+with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
+    data = json.load(f)
+segment = data['segments'].get('${segment_index}', {})
+print(f'{segment.get(\"attempts\", 0)}\n{segment.get(\"last_strategy\", \"\")}')
+")
+        local attempts=$(echo "$encoding_data" | head -n1)
+        local last_strategy=$(echo "$encoding_data" | tail -n1)
+        
+        # Check if we've exceeded max attempts
+        if [[ $attempts -ge 3 ]]; then
+            update_segment_encoding_status "$segment_index" "failed" "Exceeded maximum retry attempts" "max_exceeded"
+            print_error "Failed to encode segment after $attempts attempts: $(basename "$segment")"
+            return 1
         fi
         
-        # Second attempt with more samples
-        if ab-av1 auto-encode \
-            --input "$segment" \
-            --output "$output_segment" \
-            --encoder libsvtav1 \
-            --min-vmaf "$target_vmaf" \
-            --preset "$PRESET" \
-            --svt "tune=0:film-grain=0:film-grain-denoise=0" \
-            --keyint 10s \
-            --samples 6 \
-            --sample-duration "2s" \
-            --vmaf "n_subsample=8:pool=harmonic_mean" \
-            $vfilter_args \
-            --quiet; then
-            update_segment_encoding_status "$(get_segment_index "$segment")" "completed"
-            return 0
+        # Try default strategy first
+        if [[ $attempts -eq 0 ]] || [[ $last_strategy != "default" ]]; then
+            update_segment_encoding_status "$segment_index" "encoding" "" "default"
+            if ab-av1 auto-encode \
+                --input "$segment" \
+                --output "$output_segment" \
+                --encoder libsvtav1 \
+                --min-vmaf "$target_vmaf" \
+                --preset "$PRESET" \
+                --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                --keyint 10s \
+                --samples "$VMAF_SAMPLE_COUNT" \
+                --sample-duration "${VMAF_SAMPLE_LENGTH}s" \
+                --vmaf "n_subsample=8:pool=harmonic_mean" \
+                $vfilter_args \
+                --quiet; then
+                update_segment_encoding_status "$segment_index" "completed" "" "default"
+                return 0
+            fi
         fi
         
-        # Final attempt with lower VMAF target
-        local lower_vmaf=$((target_vmaf - 2))
-        if ab-av1 auto-encode \
-            --input "$segment" \
-            --output "$output_segment" \
-            --encoder libsvtav1 \
-            --min-vmaf "$lower_vmaf" \
-            --preset "$PRESET" \
-            --svt "tune=0:film-grain=0:film-grain-denoise=0" \
-            --keyint 10s \
-            --samples 6 \
-            --sample-duration "2s" \
-            --vmaf "n_subsample=8:pool=harmonic_mean" \
-            $vfilter_args \
-            --quiet; then
-            update_segment_encoding_status "$(get_segment_index "$segment")" "completed"
-            return 0
+        # Try more samples strategy
+        if [[ $attempts -lt 2 ]] || [[ $last_strategy != "more_samples" ]]; then
+            update_segment_encoding_status "$segment_index" "encoding" "" "more_samples"
+            if ab-av1 auto-encode \
+                --input "$segment" \
+                --output "$output_segment" \
+                --encoder libsvtav1 \
+                --min-vmaf "$target_vmaf" \
+                --preset "$PRESET" \
+                --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                --keyint 10s \
+                --samples 6 \
+                --sample-duration "2s" \
+                --vmaf "n_subsample=8:pool=harmonic_mean" \
+                $vfilter_args \
+                --quiet; then
+                update_segment_encoding_status "$segment_index" "completed" "" "more_samples"
+                return 0
+            fi
         fi
         
-        update_segment_encoding_status "$(get_segment_index "$segment")" "failed" "Failed to encode segment after all attempts"
-        print_error "Failed to encode segment after all attempts: $(basename "$segment")"
+        # Try lower VMAF target strategy
+        if [[ $attempts -lt 3 ]] || [[ $last_strategy != "lower_vmaf" ]]; then
+            local lower_vmaf=$((target_vmaf - 2))
+            update_segment_encoding_status "$segment_index" "encoding" "" "lower_vmaf"
+            if ab-av1 auto-encode \
+                --input "$segment" \
+                --output "$output_segment" \
+                --encoder libsvtav1 \
+                --min-vmaf "$lower_vmaf" \
+                --preset "$PRESET" \
+                --svt "tune=0:film-grain=0:film-grain-denoise=0" \
+                --keyint 10s \
+                --samples 6 \
+                --sample-duration "2s" \
+                --vmaf "n_subsample=8:pool=harmonic_mean" \
+                $vfilter_args \
+                --quiet; then
+                update_segment_encoding_status "$segment_index" "completed" "" "lower_vmaf"
+                return 0
+            fi
+        fi
+        
+        update_segment_encoding_status "$segment_index" "failed" "Failed to encode segment after all strategies" "all_failed"
+        print_error "Failed to encode segment after all strategies: $(basename "$segment")"
         return 1
     }
     # Export all required functions for parallel environment
@@ -586,7 +614,29 @@ EOF
     "created_at": "",
     "updated_at": "",
     "total_attempts": 0,
-    "failed_segments": 0
+    "failed_segments": 0,
+    "max_attempts": 3,
+    "retry_strategies": [
+        {
+            "name": "default",
+            "description": "Default encoding settings",
+            "samples": 4,
+            "sample_duration": 1
+        },
+        {
+            "name": "more_samples",
+            "description": "More samples for better quality estimation",
+            "samples": 6,
+            "sample_duration": 2
+        },
+        {
+            "name": "lower_vmaf",
+            "description": "Lower VMAF target by 2 points",
+            "samples": 6,
+            "sample_duration": 2,
+            "vmaf_reduction": 2
+        }
+    ]
 }
 EOF
 
@@ -707,6 +757,7 @@ update_segment_encoding_status() {
     local index="$1"
     local status="$2"
     local error="${3:-}"
+    local strategy="${4:-}"
     
     PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
 import json
@@ -717,18 +768,33 @@ with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
     data = json.load(f)
 
 segment = data['segments'].get(str(${index}))
-if segment:
-    segment['status'] = '${status}'
-    segment['attempts'] += 1
-    segment['last_attempt'] = '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
-    if '${error}':
-        segment['error'] = '${error}'
-    else:
-        segment['error'] = None
-    
-    data['total_attempts'] += 1
-    if '${status}' == 'failed':
-        data['failed_segments'] += 1
+if not segment:
+    segment = {
+        'status': '${status}',
+        'attempts': 0,
+        'strategies_tried': [],
+        'last_strategy': None,
+        'error': None
+    }
+    data['segments'][str(${index})] = segment
+
+segment['status'] = '${status}'
+if '${strategy}':
+    if 'strategies_tried' not in segment:
+        segment['strategies_tried'] = []
+    if '${strategy}' not in segment['strategies_tried']:
+        segment['strategies_tried'].append('${strategy}')
+        segment['attempts'] = len(segment['strategies_tried'])
+    segment['last_strategy'] = '${strategy}'
+
+if '${error}':
+    segment['error'] = '${error}'
+else:
+    segment['error'] = None
+
+data['total_attempts'] += 1
+if '${status}' == 'failed':
+    data['failed_segments'] += 1
 
 with open('${TEMP_DATA_DIR}/encoding.json', 'w') as f:
     json.dump(data, f, indent=4)
@@ -823,6 +889,9 @@ test_tracking_files() {
         return 1
     fi
 
+    # Initialize tracking files
+    initialize_tracking_files
+
     # Test tracking file initialization
     for file in "segments.json" "encoding.json" "progress.json"; do
         if [[ ! -f "${TEMP_DATA_DIR}/${file}" ]]; then
@@ -846,31 +915,90 @@ test_tracking_files() {
         return 1
     fi
 
-    # Test encoding status updates
-    if ! update_segment_encoding_status "1" "encoding"; then
-        print_error "Failed to update segment status"
-        return 1
-    fi
+    # Test retry functionality
+    # First attempt - default strategy
+    update_segment_encoding_status "1" "encoding" "" "default"
+    update_segment_encoding_status "1" "failed" "First attempt failed" "default"
 
-    # Verify status was updated in encoding.json
-    if ! grep -q "encoding" "${TEMP_DATA_DIR}/encoding.json"; then
-        print_error "Status not updated in encoding.json"
-        return 1
-    fi
+    # Second attempt - more samples strategy
+    update_segment_encoding_status "1" "encoding" "" "more_samples"
+    update_segment_encoding_status "1" "failed" "Second attempt failed" "more_samples"
+
+    # Third attempt - lower vmaf strategy
+    update_segment_encoding_status "1" "encoding" "" "lower_vmaf"
+    update_segment_encoding_status "1" "completed" "" "lower_vmaf"
+
+    # Verify retry tracking
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
+    data = json.load(f)
+
+segment = data['segments']['1']
+if 'default' not in segment['strategies_tried']:
+    print('Default strategy not tracked')
+    exit(1)
+if 'more_samples' not in segment['strategies_tried']:
+    print('More samples strategy not tracked')
+    exit(1)
+if 'lower_vmaf' not in segment['strategies_tried']:
+    print('Lower VMAF strategy not tracked')
+    exit(1)
+if segment['attempts'] != 3:
+    print('Attempts count incorrect')
+    exit(1)
+"
+
+    # Check final status
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
+    data = json.load(f)
+
+segment = data['segments']['1']
+if segment['status'] != 'completed':
+    print('Final status not updated')
+    exit(1)
+"
 
     # Test progress updates
-    if ! update_encoding_progress "encoding" "50.0"; then
+    if ! update_encoding_progress "completed" "100.0"; then
         print_error "Failed to update progress"
         return 1
     fi
 
     # Verify progress was updated
-    if ! grep -q "50.0" "${TEMP_DATA_DIR}/progress.json"; then
+    if ! grep -q "100.0" "${TEMP_DATA_DIR}/progress.json"; then
         print_error "Progress not updated in progress.json"
         return 1
     fi
 
+    # Test max attempts
+    local test_segment2="${SEGMENTS_DIR}/0002.mkv"
+    touch "$test_segment2"
+    add_segment_to_tracking "$test_segment2" "2" "0.0" "10.0"
+
+    # Try all strategies and verify max attempts
+    update_segment_encoding_status "2" "encoding" "" "default"
+    update_segment_encoding_status "2" "failed" "First attempt failed" "default"
+    update_segment_encoding_status "2" "encoding" "" "more_samples"
+    update_segment_encoding_status "2" "failed" "Second attempt failed" "more_samples"
+    update_segment_encoding_status "2" "encoding" "" "lower_vmaf"
+    update_segment_encoding_status "2" "failed" "Third attempt failed" "lower_vmaf"
+
+    # Try one more attempt - should be rejected
+    update_segment_encoding_status "2" "encoding" "" "default"
+
+    # Verify max attempts enforced
+    tracking_data=$(cat "${TEMP_DATA_DIR}/encoding.json")
+    if ! echo "$tracking_data" | grep -q '"status": "failed"' && \
+       ! echo "$tracking_data" | grep -q '"attempts": 3'; then
+        print_error "Max attempts not enforced"
+        return 1
+    fi
+
     # Clean up
+    rm -f "$test_segment" "$test_segment2"
     rm -rf "$WORKING_DIR"
 
     print_success "Tracking file tests passed"
