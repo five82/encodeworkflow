@@ -3,7 +3,8 @@
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Import common utilities and state management
+# Import utilities
+source "${SCRIPT_DIR}/utils/formatting.sh"
 source "${SCRIPT_DIR}/common/config.sh"
 source "${SCRIPT_DIR}/common/state_management.sh"
 
@@ -34,10 +35,16 @@ initialize_working_dirs() {
     # Create fresh directories
     for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
         mkdir -p "$dir" || {
-            error "Failed to create directory: $dir"
+            print_error "Failed to create directory: $dir"
             return 1
         }
     done
+
+    # Initialize tracking files
+    if ! initialize_tracking_files; then
+        print_error "Failed to initialize tracking files"
+        return 1
+    fi
 
     print_success "Working directories initialized"
     return 0
@@ -56,7 +63,7 @@ initialize_encoding() {
     
     # Initialize working directories
     if ! initialize_working_dirs "$output_file"; then
-        error "Failed to initialize working directories"
+        print_error "Failed to initialize working directories"
         return 1
     fi
 
@@ -86,7 +93,7 @@ EOF
 
     # Check if job creation was successful
     if [[ $status -ne 0 ]]; then
-        error "Failed to create encoding job"
+        print_error "Failed to create encoding job"
         return 1
     fi
 
@@ -111,7 +118,7 @@ prepare_video() {
     
     # Segment the video
     if ! segment_video "$input_file" "$SEGMENTS_DIR"; then
-        error "Failed to segment video"
+        print_error "Failed to segment video"
         return 1
     fi
     
@@ -142,7 +149,7 @@ encode_video() {
     
     # Encode segments
     if ! encode_segments "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$target_vmaf" "$disable_crop" "$crop_filter"; then
-        error "Failed to encode segments"
+        print_error "Failed to encode segments"
         return 1
     fi
     
@@ -162,7 +169,7 @@ finalize_encoding() {
     
     # Concatenate segments
     if ! concatenate_segments "$output_file"; then
-        error "Failed to concatenate segments"
+        print_error "Failed to concatenate segments"
         return 1
     fi
     
@@ -193,7 +200,7 @@ validate_segments() {
 
     local segment_count
     segment_count=$(find "$dir" -name "*.mkv" -type f | wc -l)
-    [[ $segment_count -lt 1 ]] && error "No segments found in $dir"
+    [[ $segment_count -lt 1 ]] && print_error "No segments found in $dir"
 
     local invalid_segments=0
     while IFS= read -r -d $'\0' segment; do
@@ -206,7 +213,7 @@ validate_segments() {
         fi
     done < <(find "$dir" -name "*.mkv" -type f -print0)
 
-    [[ $invalid_segments -gt 0 ]] && error "Found $invalid_segments invalid segments"
+    [[ $invalid_segments -gt 0 ]] && print_error "Found $invalid_segments invalid segments"
     print_success "Successfully validated $segment_count segments"
 }
 
@@ -218,13 +225,13 @@ validate_single_segment() {
 
     # Check if file exists and is readable
     if [[ ! -f "$segment_file" ]] || [[ ! -r "$segment_file" ]]; then
-        error "Segment file does not exist or is not readable: $segment_file"
+        print_error "Segment file does not exist or is not readable: $segment_file"
         return 1
     fi
 
     # Check if file is a valid video file using ffprobe
     if ! "$FFPROBE" -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 "$segment_file" > /dev/null 2>&1; then
-        error "Invalid video file: $segment_file"
+        print_error "Invalid video file: $segment_file"
         return 1
     fi
 
@@ -254,12 +261,12 @@ segment_video() {
         if [[ -f "$segment" ]]; then
             # Validate segment before adding
             if ! validate_single_segment "$segment"; then
-                error "Failed to validate segment: $segment"
+                print_error "Failed to validate segment: $segment"
                 return 1
             fi
             
-            if ! add_segment "$JOB_ID" "$index" "$segment" "" "0.0" "0.0"; then
-                error "Failed to add segment to tracking: $segment"
+            if ! add_segment_to_tracking "$segment" "$index" "0.0" "$(get_segment_duration "$segment")"; then
+                print_error "Failed to add segment to tracking: $segment"
                 return 1
             fi
             ((index++))
@@ -279,7 +286,7 @@ encode_segments() {
 
     # Check if GNU Parallel is installed
     if ! check_parallel_installation; then
-        error "Cannot proceed with parallel encoding without GNU Parallel"
+        print_error "Cannot proceed with parallel encoding without GNU Parallel"
         return 1
     fi
 
@@ -315,7 +322,7 @@ encode_segments() {
     done
 
     if [[ $segment_count -eq 0 ]]; then
-        error "No segments found to encode in $input_dir"
+        print_error "No segments found to encode in $input_dir"
         rm "$cmd_file"
         return 1
     fi
@@ -341,6 +348,7 @@ encode_segments() {
             --vmaf "n_subsample=8:pool=harmonic_mean" \
             $vfilter_args \
             --quiet; then
+            update_segment_encoding_status "$(get_segment_index "$segment")" "completed"
             return 0
         fi
         
@@ -358,6 +366,7 @@ encode_segments() {
             --vmaf "n_subsample=8:pool=harmonic_mean" \
             $vfilter_args \
             --quiet; then
+            update_segment_encoding_status "$(get_segment_index "$segment")" "completed"
             return 0
         fi
         
@@ -376,18 +385,33 @@ encode_segments() {
             --vmaf "n_subsample=8:pool=harmonic_mean" \
             $vfilter_args \
             --quiet; then
+            update_segment_encoding_status "$(get_segment_index "$segment")" "completed"
             return 0
         fi
         
-        error "Failed to encode segment after all attempts: $(basename "$segment")"
+        update_segment_encoding_status "$(get_segment_index "$segment")" "failed" "Failed to encode segment after all attempts"
+        print_error "Failed to encode segment after all attempts: $(basename "$segment")"
         return 1
     }
+    # Export all required functions for parallel environment
     export -f encode_single_segment
     export -f print_check
-    export -f error
+    export -f print_error
+    export -f print_success
+    export -f print_warning
+    export -f get_segment_index
+    export -f get_segment_duration
+    export -f update_segment_encoding_status
+    export -f update_tracking_timestamps
+    
+    # Export required variables
     export PRESET
     export VMAF_SAMPLE_COUNT
     export VMAF_SAMPLE_LENGTH
+    export FFMPEG
+    export FFPROBE
+    export TEMP_DATA_DIR
+    export ENCODED_SEGMENTS_DIR
 
     # Use GNU Parallel to process segments
     # --jobs determines how many parallel jobs to run (0 means number of CPU cores)
@@ -416,7 +440,7 @@ concatenate_segments() {
     
     # Check if there are any mkv files
     if ! compgen -G "${ENCODED_SEGMENTS_DIR}/*.mkv" > /dev/null; then
-        error "No .mkv files found in ${ENCODED_SEGMENTS_DIR}"
+        print_error "No .mkv files found in ${ENCODED_SEGMENTS_DIR}"
         return 1
     fi
 
@@ -428,13 +452,13 @@ concatenate_segments() {
     done
 
     if [[ ! -s "$concat_file" ]]; then
-        error "No segments found to concatenate"
+        print_error "No segments found to concatenate"
         return 1
     fi
 
     # Concatenate video segments directly to output file
     if ! "$FFMPEG" -hide_banner -loglevel error -f concat -safe 0 -i "$concat_file" -c copy "$output_file"; then
-        error "Failed to concatenate video segments"
+        print_error "Failed to concatenate video segments"
         return 1
     fi
 
@@ -485,7 +509,7 @@ test_initialize_working_dirs() {
     
     # First initialization should succeed
     if ! initialize_working_dirs "$test_output"; then
-        error "First initialization failed"
+        print_error "First initialization failed"
         return 1
     fi
 
@@ -493,7 +517,7 @@ test_initialize_working_dirs() {
     local all_dirs_exist=true
     for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
         if [[ ! -d "$dir" ]]; then
-            error "Directory not created: $dir"
+            print_error "Directory not created: $dir"
             all_dirs_exist=false
         fi
     done
@@ -508,13 +532,13 @@ test_initialize_working_dirs() {
 
     # Second initialization should succeed and clean up old files
     if ! initialize_working_dirs "$test_output"; then
-        error "Second initialization failed"
+        print_error "Second initialization failed"
         return 1
     fi
 
     # Verify test file was cleaned up
     if [[ -f "$test_file" ]]; then
-        error "Old files not cleaned up"
+        print_error "Old files not cleaned up"
         return 1
     fi
 
@@ -522,7 +546,7 @@ test_initialize_working_dirs() {
     all_dirs_exist=true
     for dir in "$WORKING_DIR" "$SEGMENTS_DIR" "$ENCODED_SEGMENTS_DIR" "$TEMP_DATA_DIR"; do
         if [[ ! -d "$dir" ]]; then
-            error "Directory not recreated: $dir"
+            print_error "Directory not recreated: $dir"
             all_dirs_exist=false
         fi
     done
@@ -538,10 +562,330 @@ test_initialize_working_dirs() {
     return 0
 }
 
+# Initialize tracking files
+# Args:
+#   None
+initialize_tracking_files() {
+    print_check "Initializing tracking files..."
+
+    # Create initial segments.json
+    cat > "${TEMP_DATA_DIR}/segments.json" << 'EOF'
+{
+    "segments": [],
+    "created_at": "",
+    "updated_at": "",
+    "total_segments": 0,
+    "total_duration": 0.0
+}
+EOF
+
+    # Create initial encoding.json
+    cat > "${TEMP_DATA_DIR}/encoding.json" << 'EOF'
+{
+    "segments": {},
+    "created_at": "",
+    "updated_at": "",
+    "total_attempts": 0,
+    "failed_segments": 0
+}
+EOF
+
+    # Create initial progress.json
+    cat > "${TEMP_DATA_DIR}/progress.json" << 'EOF'
+{
+    "status": "initializing",
+    "created_at": "",
+    "updated_at": "",
+    "total_progress": 0.0,
+    "segments_completed": 0,
+    "segments_failed": 0,
+    "current_segment": null
+}
+EOF
+
+    # Update timestamps
+    update_tracking_timestamps
+
+    print_success "Tracking files initialized"
+    return 0
+}
+
+# Update timestamps in tracking files
+# Args:
+#   None
+update_tracking_timestamps() {
+    local current_time
+    current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    # Update segments.json timestamps
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json, sys
+from datetime import datetime
+
+def update_timestamps(file_path):
+    with open(file_path, 'r') as f:
+        data = json.load(f)
+    
+    if not data.get('created_at'):
+        data['created_at'] = '${current_time}'
+    data['updated_at'] = '${current_time}'
+    
+    with open(file_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+for file in ['segments.json', 'encoding.json', 'progress.json']:
+    update_timestamps('${TEMP_DATA_DIR}/' + file)
+"
+}
+
+# Add segment to tracking
+# Args:
+#   $1: Segment file path
+#   $2: Segment index
+#   $3: Start time
+#   $4: Duration
+add_segment_to_tracking() {
+    local segment_path="$1"
+    local index="$2"
+    local start_time="$3"
+    local duration="$4"
+    
+    # Get segment size
+    local size
+    size=$(stat -f%z "$segment_path" 2>/dev/null || stat -c%s "$segment_path")
+    
+    # Add segment to segments.json
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json, os
+from datetime import datetime
+
+# Update segments.json
+with open('${TEMP_DATA_DIR}/segments.json', 'r') as f:
+    data = json.load(f)
+
+segment = {
+    'index': ${index},
+    'path': '${segment_path}',
+    'size': ${size},
+    'start_time': ${start_time},
+    'duration': ${duration},
+    'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
+}
+
+data['segments'].append(segment)
+data['total_segments'] = len(data['segments'])
+data['total_duration'] += ${duration}
+
+with open('${TEMP_DATA_DIR}/segments.json', 'w') as f:
+    json.dump(data, f, indent=4)
+
+# Initialize segment in encoding.json
+with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
+    encoding_data = json.load(f)
+
+encoding_data['segments'][str(${index})] = {
+    'status': 'pending',
+    'attempts': 0,
+    'last_attempt': None,
+    'error': None
+}
+
+with open('${TEMP_DATA_DIR}/encoding.json', 'w') as f:
+    json.dump(encoding_data, f, indent=4)
+"
+    
+    # Update timestamps
+    update_tracking_timestamps
+}
+
+# Update segment encoding status
+# Args:
+#   $1: Segment index
+#   $2: Status (pending, encoding, completed, failed)
+#   $3: Error message (optional)
+update_segment_encoding_status() {
+    local index="$1"
+    local status="$2"
+    local error="${3:-}"
+    
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+from datetime import datetime
+
+# Update encoding.json
+with open('${TEMP_DATA_DIR}/encoding.json', 'r') as f:
+    data = json.load(f)
+
+segment = data['segments'].get(str(${index}))
+if segment:
+    segment['status'] = '${status}'
+    segment['attempts'] += 1
+    segment['last_attempt'] = '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
+    if '${error}':
+        segment['error'] = '${error}'
+    else:
+        segment['error'] = None
+    
+    data['total_attempts'] += 1
+    if '${status}' == 'failed':
+        data['failed_segments'] += 1
+
+with open('${TEMP_DATA_DIR}/encoding.json', 'w') as f:
+    json.dump(data, f, indent=4)
+
+# Update progress.json
+with open('${TEMP_DATA_DIR}/progress.json', 'r') as f:
+    progress = json.load(f)
+
+progress['current_segment'] = int('${index}')
+if '${status}' == 'completed':
+    progress['segments_completed'] += 1
+elif '${status}' == 'failed':
+    progress['segments_failed'] += 1
+
+with open('${TEMP_DATA_DIR}/progress.json', 'w') as f:
+    json.dump(progress, f, indent=4)
+"
+    
+    # Update timestamps
+    update_tracking_timestamps
+}
+
+# Update overall encoding progress
+# Args:
+#   $1: Status
+#   $2: Progress percentage (0-100)
+update_encoding_progress() {
+    local status="$1"
+    local progress="$2"
+    
+    PYTHONPATH="/home/ken/projects/encodeworkflow/python/drapto/src" python3 -c "
+import json
+
+with open('${TEMP_DATA_DIR}/progress.json', 'r') as f:
+    data = json.load(f)
+
+data['status'] = '${status}'
+data['total_progress'] = float(${progress})
+
+with open('${TEMP_DATA_DIR}/progress.json', 'w') as f:
+    json.dump(data, f, indent=4)
+"
+    
+    # Update timestamps
+    update_tracking_timestamps
+}
+
+# Get segment duration using ffprobe
+# Args:
+#   $1: Segment file path
+get_segment_duration() {
+    local segment_file="$1"
+    local duration
+    
+    duration=$("${FFPROBE}" -v error -select_streams v:0 -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$segment_file")
+    
+    # Return duration or 0 if not found
+    echo "${duration:-0.0}"
+}
+
+# Get segment index from filename
+# Args:
+#   $1: Segment file path
+get_segment_index() {
+    local segment_file="$1"
+    local basename
+    
+    basename=$(basename "$segment_file")
+    # Extract number from filename (e.g. 0001.mkv -> 1)
+    base=${basename%.*}  # Remove extension
+    
+    # Check if the filename is all digits (after removing extension)
+    if [[ "$base" =~ ^[0-9]+$ ]]; then
+        # Convert to number (strips leading zeros)
+        echo "$((10#$base))"
+    else
+        print_error "Invalid segment filename: $segment_file"
+        echo "0"
+    fi
+}
+
+# Test tracking file functions
+# Args:
+#   None
+test_tracking_files() {
+    print_check "Testing tracking file functions..."
+    
+    # Set up test environment
+    local test_output="/tmp/test_encode_output.mkv"
+    if ! initialize_working_dirs "$test_output"; then
+        print_error "Failed to set up test environment"
+        return 1
+    fi
+
+    # Test tracking file initialization
+    for file in "segments.json" "encoding.json" "progress.json"; do
+        if [[ ! -f "${TEMP_DATA_DIR}/${file}" ]]; then
+            print_error "Tracking file not created: ${file}"
+            return 1
+        fi
+    done
+
+    # Test segment tracking
+    local test_segment="${SEGMENTS_DIR}/0001.mkv"
+    touch "$test_segment"
+    
+    if ! add_segment_to_tracking "$test_segment" "1" "0.0" "10.0"; then
+        print_error "Failed to add segment to tracking"
+        return 1
+    fi
+
+    # Verify segment was added to segments.json
+    if ! grep -q "0001.mkv" "${TEMP_DATA_DIR}/segments.json"; then
+        print_error "Segment not found in segments.json"
+        return 1
+    fi
+
+    # Test encoding status updates
+    if ! update_segment_encoding_status "1" "encoding"; then
+        print_error "Failed to update segment status"
+        return 1
+    fi
+
+    # Verify status was updated in encoding.json
+    if ! grep -q "encoding" "${TEMP_DATA_DIR}/encoding.json"; then
+        print_error "Status not updated in encoding.json"
+        return 1
+    fi
+
+    # Test progress updates
+    if ! update_encoding_progress "encoding" "50.0"; then
+        print_error "Failed to update progress"
+        return 1
+    fi
+
+    # Verify progress was updated
+    if ! grep -q "50.0" "${TEMP_DATA_DIR}/progress.json"; then
+        print_error "Progress not updated in progress.json"
+        return 1
+    fi
+
+    # Clean up
+    rm -rf "$WORKING_DIR"
+
+    print_success "Tracking file tests passed"
+    return 0
+}
+
 # Run tests if TEST_MODE is enabled
 if [[ "${TEST_MODE:-false}" == "true" ]]; then
     if ! test_initialize_working_dirs; then
-        error "Directory initialization tests failed"
+        print_error "Directory initialization tests failed"
+        exit 1
+    fi
+    
+    if ! test_tracking_files; then
+        print_error "Tracking file tests failed"
         exit 1
     fi
 fi
