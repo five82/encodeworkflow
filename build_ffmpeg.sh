@@ -214,7 +214,7 @@ configure_ffmpeg() {
     export CXX=/usr/bin/g++
     export CFLAGS="-I${brew_prefix}/include -O3"
     export CXXFLAGS="-I${brew_prefix}/include -O3"
-    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib -Wl,-rpath,${INSTALL_DIR}/lib"
+    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib -Wl,-rpath,/usr/local/lib"
     export LD_LIBRARY_PATH="${brew_prefix}/lib:${LD_LIBRARY_PATH}"
     
     # Print versions of key dependencies
@@ -224,7 +224,7 @@ configure_ffmpeg() {
     echo "dav1d: $(PKG_CONFIG_PATH="${brew_prefix}/lib/pkgconfig" pkg-config --modversion dav1d)"
     
     ./configure \
-        --prefix="${INSTALL_DIR}" \
+        --prefix="/usr/local" \
         --enable-gpl \
         --enable-version3 \
         --enable-shared \
@@ -336,14 +336,6 @@ echo "Binaries location:"
 echo "  ffmpeg:  ${INSTALL_DIR}/bin/ffmpeg"
 echo "  ffprobe: ${INSTALL_DIR}/bin/ffprobe"
 
-# Copy binaries to script directory
-echo "Copying binaries to script directory..."
-cp "${INSTALL_DIR}/bin/ffmpeg" "${SCRIPT_DIR}/ffmpeg"
-cp "${INSTALL_DIR}/bin/ffprobe" "${SCRIPT_DIR}/ffprobe"
-
-echo "Done! Binaries are available at:"
-echo "  ffmpeg:  ${SCRIPT_DIR}/ffmpeg"
-echo "  ffprobe: ${SCRIPT_DIR}/ffprobe"
 
 # Print library versions
 echo "Checking library versions..."
