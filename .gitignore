@@ -28,3 +28,4 @@ ffmpeg_install/
 # FFmpeg binaries
 ffmpeg
 ffprobe 
+.aider*
