@@ -214,7 +214,7 @@ configure_ffmpeg() {
     export CXX=/usr/bin/g++
     export CFLAGS="-I${brew_prefix}/include -O3"
     export CXXFLAGS="-I${brew_prefix}/include -O3"
-    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib"
+    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib -Wl,-rpath,${INSTALL_DIR}/lib"
     export LD_LIBRARY_PATH="${brew_prefix}/lib:${LD_LIBRARY_PATH}"
     
     # Print versions of key dependencies
