@@ -169,7 +169,7 @@ check_build_dependencies() {
 }
 
 # Create and enter build directory
-BUILD_DIR="${SCRIPT_DIR}/ffmpeg_build"
+BUILD_DIR="/tmp/ffmpeg_build"
 mkdir -p $BUILD_DIR
 
 # Near the top, after BUILD_DIR definition
