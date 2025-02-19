@@ -172,9 +172,8 @@ check_build_dependencies() {
 BUILD_DIR="/tmp/ffmpeg_build"
 mkdir -p $BUILD_DIR
 
-# Near the top, after BUILD_DIR definition
-INSTALL_DIR="${BUILD_DIR}/install"
-mkdir -p $INSTALL_DIR
+INSTALL_DIR="${HOME}/.local"
+mkdir -p "$INSTALL_DIR"
 
 # Check system dependencies before starting any builds
 check_dependencies
@@ -214,7 +213,7 @@ configure_ffmpeg() {
     export CXX=/usr/bin/g++
     export CFLAGS="-I${brew_prefix}/include -O3"
     export CXXFLAGS="-I${brew_prefix}/include -O3"
-    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib -Wl,-rpath,/usr/local/lib"
+    export LDFLAGS="-L${brew_prefix}/lib -Wl,-rpath,${brew_prefix}/lib -Wl,-rpath,${HOME}/.local/lib"
     export LD_LIBRARY_PATH="${brew_prefix}/lib:${LD_LIBRARY_PATH}"
     
     # Print versions of key dependencies
@@ -224,7 +223,7 @@ configure_ffmpeg() {
     echo "dav1d: $(PKG_CONFIG_PATH="${brew_prefix}/lib/pkgconfig" pkg-config --modversion dav1d)"
     
     ./configure \
-        --prefix="/usr/local" \
+        --prefix="${HOME}/.local" \
         --enable-gpl \
         --enable-version3 \
         --enable-shared \
