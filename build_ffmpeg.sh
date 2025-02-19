@@ -252,9 +252,6 @@ configure_ffmpeg() {
 # Build FFmpeg
 git clone --depth=1 https://github.com/FFmpeg/FFmpeg.git
 cd FFmpeg
-# Checkout the latest stable version
-git fetch --tags
-git checkout n7.1
 
 # Verify compiler before proceeding
 if ! verify_compiler; then
