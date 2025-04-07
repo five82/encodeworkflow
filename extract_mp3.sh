@@ -28,8 +28,8 @@ fi
 # First Pass: Measure Loudness
 # ---------------------------
 echo "Measuring loudness parameters..."
-measure_output=$(ffmpeg -hide_banner -loglevel error -i "$input_file" -map 0:a:0 \
--af "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json" -f null - 2>&1 | sed -n 's/.*\({.*}\).*/\1/p')
+measure_output=$(ffmpeg -hide_banner -loglevel info -threads auto -i "$input_file" -map 0:a:0 \
+-af "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json" -f null - 2>&1 | sed -n '/{/,/}/p')
 
 if [ -z "$measure_output" ]; then
     echo "Error: Failed to measure loudness."
