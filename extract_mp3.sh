@@ -43,6 +43,11 @@ input_lra=$(echo "$measure_output" | jq -r '.input_lra')
 input_thresh=$(echo "$measure_output" | jq -r '.input_thresh')
 offset=$(echo "$measure_output" | jq -r '.offset')
 
+# If offset is null, default to 0
+if [ "$offset" = "null" ]; then
+    offset=0
+fi
+
 echo "Measured values:"
 echo "  input_i     : $input_i"
 echo "  input_tp    : $input_tp"
@@ -54,9 +59,9 @@ echo "  offset      : $offset"
 # Second Pass: Apply Normalization and Convert MP3
 # ----------------------------------------------
 echo "Applying loudness normalization and converting to MP3..."
-ffmpeg -hide_banner -loglevel error -i "$input_file" -map 0:a:0 \
+ffmpeg -hide_banner -loglevel error -threads auto -i "$input_file" -map 0:a:0 \
 -af "loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=$input_i:measured_TP=$input_tp:measured_LRA=$input_lra:measured_thresh=$input_thresh:offset=$offset:linear=true:print_format=summary" \
--ac 2 -ar 16000 -c:a libmp3lame -b:a 96k -threads auto "$output_file"
+-ac 2 -ar 16000 -c:a libmp3lame -b:a 96k "$output_file"
 
 if [ $? -eq 0 ]; then
     echo "Successfully converted to: $output_file"
