@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Creates a normalized MP3 of the first audio track for Whisper AI SRT transcription
 # using two-pass loudnorm normalization.
@@ -58,7 +58,7 @@ echo "  offset      : $offset"
 # ----------------------------------------------
 # Second Pass: Apply Normalization and Convert MP3
 # ----------------------------------------------
-echo "Applying loudness normalization and converting to MP3..."
+echo "Applying loudness normalization and converting to mp3..."
 ffmpeg -hide_banner -loglevel error -threads auto -i "$input_file" -map 0:a:0 \
 -af "loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=$input_i:measured_TP=$input_tp:measured_LRA=$input_lra:measured_thresh=$input_thresh:offset=$offset:linear=true:print_format=summary" \
 -ac 2 -ar 16000 -c:a libmp3lame -q:a 0 "$output_file"
@@ -69,3 +69,9 @@ else
     echo "Error during conversion"
     exit 1
 fi
+
+echo "Creating srt transcription with whisperx"
+uvx whisperx "$output_file" --model large-v3 --output_format srt --segment_resolution sentence --compute_type float32 --language en
+echo "srt transcription complete"
+echo "Cleaning up $output_file"
+rm -f "$output_file"
