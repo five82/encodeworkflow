@@ -10,7 +10,7 @@ if [ $# -ne 1 ]; then
 fi
 
 input_file="$1"
-output_file="${input_file%.*}_normalized.mp3"
+output_file="${input_file%.*}.mp3"
 
 # Check if input file exists
 if [ ! -f "$input_file" ]; then
@@ -61,7 +61,7 @@ echo "  offset      : $offset"
 echo "Applying loudness normalization and converting to MP3..."
 ffmpeg -hide_banner -loglevel error -threads auto -i "$input_file" -map 0:a:0 \
 -af "loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=$input_i:measured_TP=$input_tp:measured_LRA=$input_lra:measured_thresh=$input_thresh:offset=$offset:linear=true:print_format=summary" \
--ac 2 -ar 16000 -c:a libmp3lame -b:a 96k "$output_file"
+-ac 2 -ar 16000 -c:a libmp3lame -q:a 0 "$output_file"
 
 if [ $? -eq 0 ]; then
     echo "Successfully converted to: $output_file"
