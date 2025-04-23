@@ -2,15 +2,15 @@
 
 # build_ffmpeg_static.sh
 # Builds a static FFmpeg binary on macOS (Homebrew) or Debian (Linuxbrew)
-# Includes: libsvtav1, libx264, libx265, libopus
+# Includes: libsvtav1, libopus
 
 # --- Configuration ---
 INSTALL_PREFIX="$HOME/ffmpeg_static"
 BUILD_DIR="/tmp/ffmpeg_build_temp"
 FFMPEG_BRANCH="master" # Build from master branch
 SVT_AV1_BRANCH="master" # Build svt-av1 from master branch
-X264_BRANCH="stable" # Use stable branch due to master build issues on ARM
-X265_BRANCH="master"
+# X264_BRANCH="stable" # Removed
+# X265_BRANCH="master" # Removed
 OPUS_BRANCH="main" # Opus uses 'main' as its default branch
 
 # --- Helper Functions ---
@@ -29,6 +29,10 @@ check_command() {
 if [ -d "$BUILD_DIR" ]; then
     _log "Removing previous build directory: $BUILD_DIR"
     rm -rf "$BUILD_DIR"
+fi
+if [ -d "$INSTALL_PREFIX" ]; then
+    _log "Removing previous install directory: $INSTALL_PREFIX"
+    rm -rf "$INSTALL_PREFIX"
 fi
 
 # --- Strict Mode & Error Handling ---
@@ -86,7 +90,10 @@ DEPS=(
     pkg-config
     git # For cloning ffmpeg source
     wget # For opus model download
-    # svt-av1, x264, x265, opus will be built from source
+    autoconf # For opus autogen.sh
+    automake # For opus autogen.sh
+    libtool # For opus autogen.sh
+    # svt-av1 and opus will be built from source
     # libva will be installed conditionally below for Linux
 )
 
@@ -140,8 +147,6 @@ mkdir -p "$BUILD_DIR"
 mkdir -p "$INSTALL_PREFIX"
 rm -rf "$BUILD_DIR/ffmpeg" # Clean previous ffmpeg source attempt
 rm -rf "$BUILD_DIR/SVT-AV1" # Clean previous svt-av1 source attempt
-rm -rf "$BUILD_DIR/x264" # Clean previous x264 source attempt
-rm -rf "$BUILD_DIR/x265_git" # Clean previous x265 source attempt
 rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
 
 # --- Build SVT-AV1 from Source ---
@@ -164,51 +169,6 @@ make -j"$CPU_COUNT"
 _log "Installing SVT-AV1..."
 make install
 _log "SVT-AV1 installation complete."
-
-
-# --- Build x264 from Source ---
-_log "Cloning x264 source (branch: $X264_BRANCH)..."
-cd "$BUILD_DIR"
-git clone --depth 1 --branch "$X264_BRANCH" https://code.videolan.org/videolan/x264.git x264
-cd x264
-
-_log "Configuring x264..."
-# Note: --enable-pic is important for static libs that will be linked into FFmpeg
-./configure \
-    --prefix="$INSTALL_PREFIX" \
-    --enable-static \
-    --disable-shared \
-    --enable-pic \
-    --disable-cli # We only need the library
-
-_log "Building x264 (using $CPU_COUNT cores)..."
-make -j"$CPU_COUNT"
-_log "Installing x264..."
-make install
-_log "x264 installation complete."
-
-
-# --- Build x265 from Source ---
-_log "Cloning x265 source (branch: $X265_BRANCH)..."
-cd "$BUILD_DIR"
-# Note: The repo name is x265_git, but we clone into 'x265' directory for consistency
-git clone --depth 1 --branch "$X265_BRANCH" https://bitbucket.org/multicoreware/x265_git.git x265
-cd x265/build/linux # x265 uses build directories
-
-_log "Configuring x265..."
-# x265 uses CMake
-cmake ../../source \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
-    -DENABLE_SHARED=OFF \
-    -DENABLE_CLI=OFF \
-    -DCMAKE_BUILD_TYPE=Release
-
-_log "Building x265 (using $CPU_COUNT cores)..."
-make -j"$CPU_COUNT"
-_log "Installing x265..."
-make install
-_log "x265 installation complete."
-
 
 # --- Build opus from Source ---
 _log "Cloning opus source (branch: $OPUS_BRANCH)..."
@@ -257,9 +217,9 @@ fi
     --disable-shared \
     --enable-gpl \
     --enable-libsvtav1 \
-    --enable-libx264 \
-    --enable-libx265 \
     --enable-libopus \
+    --disable-xlib \
+    --disable-libxcb \
     --extra-cflags="$CFLAGS" \
     --extra-ldflags="$LDFLAGS" \
     $FFMPEG_HW_FLAGS
@@ -275,7 +235,7 @@ _log "Installation complete."
 
 # --- Validate Static Linking ---
 _log "Validating static linking..."
-BINARIES=(ffmpeg ffplay ffprobe)
+BINARIES=(ffmpeg ffprobe) # ffplay is likely not built due to --disable-xlib/--disable-libxcb
 VALIDATION_FAILED=0
 
 for binary in "${BINARIES[@]}"; do
@@ -292,8 +252,6 @@ for binary in "${BINARIES[@]}"; do
         dynamic_brew_libs=()
         # Check for brew-installed dynamic libs we wanted static
         # Check for dynamic libs we built ourselves (should NOT be listed dynamically)
-        if echo "$linked_libs" | grep -q "$INSTALL_PREFIX/lib/libx264"; then dynamic_brew_libs+=("x264 (dynamic)"); fi
-        if echo "$linked_libs" | grep -q "$INSTALL_PREFIX/lib/libx265"; then dynamic_brew_libs+=("x265 (dynamic)"); fi
         if echo "$linked_libs" | grep -q "$INSTALL_PREFIX/lib/libopus"; then dynamic_brew_libs+=("opus (dynamic)"); fi
         if echo "$linked_libs" | grep -q "$INSTALL_PREFIX/lib/libSvtAv1Enc"; then dynamic_brew_libs+=("SvtAv1Enc (dynamic)"); fi
 
@@ -309,9 +267,9 @@ for binary in "${BINARIES[@]}"; do
         ldd_output=$(ldd "$binary_path" 2>&1) || true # Capture output even if ldd fails
 
         # Failure condition 1: Dynamically linked against our locally built libs in INSTALL_PREFIX
-        if echo "$ldd_output" | grep -q -E "$INSTALL_PREFIX/lib/libx264.so|$INSTALL_PREFIX/lib/libx265.so|$INSTALL_PREFIX/lib/libopus.so|$INSTALL_PREFIX/lib/libSvtAv1Enc.so"; then
+        if echo "$ldd_output" | grep -q -E "$INSTALL_PREFIX/lib/libopus.so|$INSTALL_PREFIX/lib/libSvtAv1Enc.so"; then
             _log "Error: $binary appears dynamically linked against locally built libs:"
-            echo "$ldd_output" | grep --color=never "$INSTALL_PREFIX/lib/"
+            echo "$ldd_output" | grep --color=never "$INSTALL_PREFIX/lib/" | grep -E --color=never 'libopus.so|libSvtAv1Enc.so'
             VALIDATION_FAILED=1
         # Failure condition 2: Dynamically linked against libva.so (should be static libva.a)
         elif echo "$ldd_output" | grep -q 'libva.so'; then
@@ -344,7 +302,7 @@ _log "Build directory $BUILD_DIR kept for inspection. Remove manually if desired
 # --- Final Message ---
 _log "--------------------------------------------------"
 _log "Static FFmpeg build successful!"
-_log "The static binaries (ffmpeg, ffplay, ffprobe) are located at: $INSTALL_PREFIX/bin/"
+_log "The static binaries (ffmpeg, ffprobe) are located at: $INSTALL_PREFIX/bin/"
 if [[ "$OS_NAME" == "Linux" ]]; then
     _log "NOTE: VA-API hardware acceleration enabled, but requires runtime drivers (e.g., intel-media-va-driver or mesa-va-drivers) installed via your system package manager (apt, dnf, etc.)."
 fi
