@@ -7,11 +7,13 @@
 # --- Configuration ---
 INSTALL_PREFIX="$HOME/ffmpeg_static"
 BUILD_DIR="/tmp/ffmpeg_build_temp"
-FFMPEG_BRANCH="master" # Build from master branch
-SVT_AV1_BRANCH="master" # Build svt-av1 from master branch
-# X264_BRANCH="stable" # Removed
-# X265_BRANCH="master" # Removed
-OPUS_BRANCH="main" # Opus uses 'main' as its default branch
+FFMPEG_REPO="https://git.ffmpeg.org/ffmpeg.git"
+FFMPEG_BRANCH="master"
+SVT_AV1_REPO="https://gitlab.com/AOMediaCodec/SVT-AV1.git" # svt-av1
+#SVT_AV1_REPO="https://github.com/BlueSwordM/svt-av1-psyex.git" # svt-av1-psyex
+SVT_AV1_BRANCH="master"
+OPUS_REPO="https://gitlab.xiph.org/xiph/opus.git"
+OPUS_BRANCH="main"
 
 # --- Helper Functions ---
 _log() {
@@ -152,7 +154,7 @@ rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
 # --- Build SVT-AV1 from Source ---
 _log "Cloning SVT-AV1 source (branch: $SVT_AV1_BRANCH)..."
 cd "$BUILD_DIR"
-git clone --depth 1 --branch "$SVT_AV1_BRANCH" https://gitlab.com/AOMediaCodec/SVT-AV1.git SVT-AV1
+git clone --depth 1 --branch "$SVT_AV1_BRANCH" "$SVT_AV1_REPO" SVT-AV1
 cd SVT-AV1
 
 _log "Configuring SVT-AV1..."
@@ -173,7 +175,7 @@ _log "SVT-AV1 installation complete."
 # --- Build opus from Source ---
 _log "Cloning opus source (branch: $OPUS_BRANCH)..."
 cd "$BUILD_DIR"
-git clone --depth 1 --branch "$OPUS_BRANCH" https://gitlab.xiph.org/xiph/opus.git opus
+git clone --depth 1 --branch "$OPUS_BRANCH" "$OPUS_REPO" opus
 cd opus
 
 _log "Configuring opus..."
@@ -195,7 +197,7 @@ _log "opus installation complete."
 # --- Download FFmpeg ---
 _log "Downloading FFmpeg source (branch: $FFMPEG_BRANCH)..."
 cd "$BUILD_DIR" # Go back to build dir
-git clone --depth 1 --branch "$FFMPEG_BRANCH" https://git.ffmpeg.org/ffmpeg.git ffmpeg
+git clone --depth 1 --branch "$FFMPEG_BRANCH" "$FFMPEG_REPO" ffmpeg
 cd ffmpeg
 
 # --- Configure FFmpeg ---
