@@ -96,7 +96,6 @@ DEPS=(
     automake # For opus autogen.sh
     libtool # For opus autogen.sh
     # svt-av1 and opus will be built from source
-    # libva will be installed conditionally below for Linux
 )
 
 for dep in "${DEPS[@]}"; do
@@ -107,17 +106,6 @@ for dep in "${DEPS[@]}"; do
         "$BREW_CMD" install "$dep"
     fi
 done
-
-# Install Linux-specific dependencies
-if [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Installing Linux-specific dependencies (libva)..."
-    if "$BREW_CMD" list libva &> /dev/null; then
-        _log "libva is already installed."
-    else
-        _log "Installing libva..."
-        "$BREW_CMD" install libva
-    fi
-fi
 
 _log "Dependencies installed."
 
@@ -203,15 +191,6 @@ cd ffmpeg
 # --- Configure FFmpeg ---
 _log "Configuring FFmpeg..."
 
-# Add platform-specific hardware acceleration flags
-FFMPEG_HW_FLAGS=""
-if [[ "$OS_NAME" == "Darwin" ]]; then
-    _log "Enabling VideoToolbox for macOS hardware acceleration."
-    FFMPEG_HW_FLAGS="--enable-videotoolbox"
-elif [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Enabling VA-API for Linux hardware acceleration."
-    FFMPEG_HW_FLAGS="--enable-vaapi"
-fi
 ./configure \
     --prefix="$INSTALL_PREFIX" \
     --pkg-config-flags="--static" \
@@ -223,8 +202,7 @@ fi
     --disable-xlib \
     --disable-libxcb \
     --extra-cflags="$CFLAGS" \
-    --extra-ldflags="$LDFLAGS" \
-    $FFMPEG_HW_FLAGS
+    --extra-ldflags="$LDFLAGS"
 
 _log "FFmpeg configuration complete."
 
@@ -273,12 +251,7 @@ for binary in "${BINARIES[@]}"; do
             _log "Error: $binary appears dynamically linked against locally built libs:"
             echo "$ldd_output" | grep --color=never "$INSTALL_PREFIX/lib/" | grep -E --color=never 'libopus.so|libSvtAv1Enc.so'
             VALIDATION_FAILED=1
-        # Failure condition 2: Dynamically linked against libva.so (should be static libva.a)
-        elif echo "$ldd_output" | grep -q 'libva.so'; then
-            _log "Error: $binary appears dynamically linked against libva.so (should be static):"
-            echo "$ldd_output" | grep --color=never 'libva.so'
-            VALIDATION_FAILED=1
-        # Success condition: No dynamic links to our local builds or libva.so found
+        # Success condition: No dynamic links to our local builds found
         else
             _log "$binary linkage appears correct (no unexpected dynamic libs found)."
             # Optional: Log the actual system dependencies found
@@ -305,9 +278,6 @@ _log "Build directory $BUILD_DIR kept for inspection. Remove manually if desired
 _log "--------------------------------------------------"
 _log "Static FFmpeg build successful!"
 _log "The static binaries (ffmpeg, ffprobe) are located at: $INSTALL_PREFIX/bin/"
-if [[ "$OS_NAME" == "Linux" ]]; then
-    _log "NOTE: VA-API hardware acceleration enabled, but requires runtime drivers (e.g., intel-media-va-driver or mesa-va-drivers) installed via your system package manager (apt, dnf, etc.)."
-fi
 _log "--------------------------------------------------"
 
 exit 0
