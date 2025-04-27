@@ -203,6 +203,7 @@ _log "Configuring FFmpeg..."
     --disable-libxcb \
     --disable-vaapi \
     --disable-vdpau \
+    --disable-libdrm \
     --extra-cflags="$CFLAGS" \
     --extra-ldflags="$LDFLAGS"
 
