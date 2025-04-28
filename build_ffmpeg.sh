@@ -5,7 +5,7 @@
 # Includes: libsvtav1, libopus
 
 # --- Configuration ---
-INSTALL_PREFIX="/usr/local" # Changed to system-wide install
+INSTALL_PREFIX="$HOME/.local" # Install into user's local directory
 BUILD_DIR="/tmp/ffmpeg_build_temp"
 FFMPEG_REPO="https://github.com/FFmpeg/FFmpeg.git"
 FFMPEG_BRANCH="master"
@@ -162,7 +162,7 @@ cmake .. \
 _log "Building SVT-AV1 (using $CPU_COUNT cores)..."
 make -j"$CPU_COUNT"
 _log "Installing SVT-AV1..."
-sudo make install # Added sudo for /usr/local
+make install # No sudo needed for $HOME/.local
 _log "SVT-AV1 installation complete."
 
 # --- Build opus from Source ---
@@ -183,7 +183,7 @@ _log "Configuring opus..."
 _log "Building opus (using $CPU_COUNT cores)..."
 make -j"$CPU_COUNT"
 _log "Installing opus..."
-sudo make install # Added sudo for /usr/local
+make install # No sudo needed for $HOME/.local
 _log "opus installation complete."
 
 
@@ -205,6 +205,10 @@ pkg-config --exists --print-errors "SvtAv1Enc >= 0.9.0" || _log "pkg-config chec
 _log "pkg-config check complete."
 _log "Configuring FFmpeg..."
 
+# Ensure pkg-config finds the libraries installed in the custom prefix
+export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+_log "PKG_CONFIG_PATH set to: $PKG_CONFIG_PATH"
+
 ./configure \
     --prefix="$INSTALL_PREFIX" \
     --disable-static \
@@ -225,7 +229,7 @@ _log "FFmpeg configuration complete."
 _log "Building FFmpeg (using $CPU_COUNT cores)..."
 make -j"$CPU_COUNT"
 _log "Build complete. Installing FFmpeg..."
-sudo make install # Added sudo for /usr/local
+make install # No sudo needed for $HOME/.local
 _log "Installation complete."
 
 # --- Validate Static Linking ---
