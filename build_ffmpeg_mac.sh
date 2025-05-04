@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # build_ffmpeg.sh
-# Builds FFmpeg binaries on macOS (Homebrew) or Debian (Linuxbrew)
+# Builds FFmpeg binaries on macOS using Homebrew
 # Includes: libsvtav1, libopus
 
 # --- Configuration ---
@@ -41,39 +41,15 @@ fi
 set -euo pipefail
 trap 'echo "Error on line $LINENO"; exit 1' ERR
 
-# --- OS Detection & Setup ---
-OS_NAME=$(uname -s)
-BREW_CMD=""
-CPU_COUNT=""
+# --- macOS Setup ---
+_log "Setting up for macOS (Homebrew)"
+BREW_CMD="brew"
+CPU_COUNT=$(sysctl -n hw.ncpu)
 
-_log "Detected OS: $OS_NAME"
-
-if [[ "$OS_NAME" == "Darwin" ]]; then
-    _log "Setting up for macOS (Homebrew)"
-    BREW_CMD="brew"
-    CPU_COUNT=$(sysctl -n hw.ncpu)
-elif [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Setting up for Linux (Linuxbrew)"
-    # Check for Debian specifically if needed, but Linuxbrew path is the main goal
-    if [[ -f /etc/debian_version ]]; then
-        _log "Debian detected."
-    fi
-    # Standard Linuxbrew path or fallback to Homebrew path if installed differently
-    if [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-         BREW_CMD="/home/linuxbrew/.linuxbrew/bin/brew"
-    elif command -v brew &> /dev/null; then
-         BREW_CMD="brew" # Assume brew is in PATH if not in default Linuxbrew location
-    fi
-    CPU_COUNT=$(nproc)
-else
-    _log "Error: Unsupported operating system '$OS_NAME'."
-    exit 1
-fi
-
-if [[ -z "$BREW_CMD" ]]; then
-     _log "Error: brew command not found. Please install Homebrew (macOS) or Linuxbrew (Debian)."
-     _log "macOS: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-     _log "Debian/Linux: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+# Check if brew command exists
+if ! command -v "$BREW_CMD" &> /dev/null; then
+     _log "Error: brew command ('$BREW_CMD') not found. Please install Homebrew."
+     _log "Installation command: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
      exit 1
 fi
 
@@ -109,31 +85,6 @@ for dep in "${DEPS[@]}"; do
 done
 
 _log "Dependencies installed."
-# --- Install Linux-specific Dependencies ---
-if [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Installing Linux-specific dependencies..."
-    LINUX_DEPS=(
-        vulkan-headers
-        vulkan-loader
-    )
-    for dep in "${LINUX_DEPS[@]}"; do
-        if "$BREW_CMD" list "$dep" &> /dev/null; then
-            _log "$dep is already installed."
-        else
-            _log "Installing $dep..."
-            if "$BREW_CMD" install "$dep"; then
-                 _log "Successfully installed $dep."
-            else
-                 _log "Warning: Failed to install $dep via brew."
-                 _log "         Vulkan support might not be enabled correctly."
-                 _log "         Please install it manually (e.g., using your system package manager like apt or dnf) and ensure pkg-config can find 'vulkan'."
-                 # Decide if we should exit here or just warn. Warning seems better.
-            fi
-        fi
-    done
-    _log "Linux-specific dependencies check complete."
-fi
-
 # --- Environment Configuration ---
 # No custom environment needed for standard /usr/local shared build
 _log "Using standard build environment for /usr/local installation."
@@ -223,50 +174,13 @@ _log "PKG_CONFIG_PATH set to: $PKG_CONFIG_PATH"
 
 # --- Add OS-specific flags ---
 FFMPEG_EXTRA_FLAGS=""
-EXTRA_CFLAGS_VAL="" # Use different var names to avoid confusion
 EXTRA_LDFLAGS_VAL=""
-if [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Linux detected: Checking for Vulkan support..."
-    # Dependencies are now installed earlier if needed.
-    # Now check if pkg-config can find vulkan after potential installation
-    if pkg-config --exists vulkan; then
-        _log "Vulkan SDK found via pkg-config. Enabling Vulkan support and adding paths."
-        FFMPEG_EXTRA_FLAGS="--enable-vulkan"
-        # Explicitly provide paths for configure script
-        VULKAN_HEADERS_PREFIX=$("$BREW_CMD" --prefix vulkan-headers)
-        VULKAN_LOADER_PREFIX=$("$BREW_CMD" --prefix vulkan-loader)
-        if [[ -n "$VULKAN_HEADERS_PREFIX" && -d "$VULKAN_HEADERS_PREFIX/include" ]]; then
-             EXTRA_CFLAGS_VAL+="-I${VULKAN_HEADERS_PREFIX}/include" # No leading/trailing space needed here
-             _log "Adding Vulkan include path: ${EXTRA_CFLAGS_VAL}"
-        else
-            _log "Warning: Could not find vulkan-headers include directory via brew prefix."
-        fi
-        if [[ -n "$VULKAN_LOADER_PREFIX" && -d "$VULKAN_LOADER_PREFIX/lib" ]]; then
-             EXTRA_LDFLAGS_VAL+="-L${VULKAN_LOADER_PREFIX}/lib" # No leading/trailing space needed here
-             _log "Adding Vulkan library path: ${EXTRA_LDFLAGS_VAL}"
-        else
-             _log "Warning: Could not find vulkan-loader lib directory via brew prefix."
-        fi
-    else
-        _log "Warning: Vulkan SDK not found via pkg-config even after attempting install. Skipping --enable-vulkan."
-        _log "         Ensure Vulkan development libraries are installed and discoverable by pkg-config."
-    fi
+# macOS specific flags
+_log "macOS detected: Enabling VideoToolbox support."
+FFMPEG_EXTRA_FLAGS="--enable-videotoolbox"
 
-    # Add rpath to LDFLAGS, ensuring space if Vulkan flags were added
-    # This should be INSIDE the Linux block
-    if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-        EXTRA_LDFLAGS_VAL+=" " # Add space separator if Vulkan flags were added
-    fi
-elif [[ "$OS_NAME" == "Darwin" ]]; then
-    _log "macOS detected: Enabling VideoToolbox support."
-    FFMPEG_EXTRA_FLAGS="--enable-videotoolbox"
-fi # End of OS-specific block
-
-# Add rpath to LDFLAGS for both Linux and macOS to find libs in INSTALL_PREFIX
-if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-    EXTRA_LDFLAGS_VAL+=" " # Add space separator if needed (e.g., after Linux Vulkan flags)
-fi
-EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib"
+# Add rpath to LDFLAGS to find libs in INSTALL_PREFIX
+EXTRA_LDFLAGS_VAL="-Wl,-rpath,${INSTALL_PREFIX}/lib"
 
 # --- Build configure arguments array ---
 CONFIGURE_ARGS=(
@@ -276,17 +190,9 @@ CONFIGURE_ARGS=(
     --enable-gpl
     --enable-libsvtav1
     --enable-libopus
-    --disable-xlib
-    --disable-libxcb
-    --disable-vaapi
-    --disable-vdpau
-    --disable-libdrm
-)
+) # Removed Linux-specific disables: xlib, libxcb, vaapi, vdpau, libdrm
 
 # Add conditional flags to the array
-if [[ -n "$EXTRA_CFLAGS_VAL" ]]; then
-    CONFIGURE_ARGS+=(--extra-cflags="$EXTRA_CFLAGS_VAL")
-fi
 if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
     CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL")
 fi
