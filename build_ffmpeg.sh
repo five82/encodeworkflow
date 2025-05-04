@@ -109,6 +109,30 @@ for dep in "${DEPS[@]}"; do
 done
 
 _log "Dependencies installed."
+# --- Install Linux-specific Dependencies ---
+if [[ "$OS_NAME" == "Linux" ]]; then
+    _log "Installing Linux-specific dependencies..."
+    LINUX_DEPS=(
+        vulkan-headers
+        vulkan-loader
+    )
+    for dep in "${LINUX_DEPS[@]}"; do
+        if "$BREW_CMD" list "$dep" &> /dev/null; then
+            _log "$dep is already installed."
+        else
+            _log "Installing $dep..."
+            if "$BREW_CMD" install "$dep"; then
+                 _log "Successfully installed $dep."
+            else
+                 _log "Warning: Failed to install $dep via brew."
+                 _log "         Vulkan support might not be enabled correctly."
+                 _log "         Please install it manually (e.g., using your system package manager like apt or dnf) and ensure pkg-config can find 'vulkan'."
+                 # Decide if we should exit here or just warn. Warning seems better.
+            fi
+        fi
+    done
+    _log "Linux-specific dependencies check complete."
+fi
 
 # --- Environment Configuration ---
 # No custom environment needed for standard /usr/local shared build
@@ -203,20 +227,7 @@ EXTRA_CFLAGS_VAL="" # Use different var names to avoid confusion
 EXTRA_LDFLAGS_VAL=""
 if [[ "$OS_NAME" == "Linux" ]]; then
     _log "Linux detected: Checking for Vulkan support..."
-    # Check if Vulkan SDK headers/loader are installed via Brew
-    if ! "$BREW_CMD" list vulkan-headers &> /dev/null || ! "$BREW_CMD" list vulkan-loader &> /dev/null; then
-        _log "Vulkan headers/loader not found via brew. Attempting installation..."
-        # Attempt to install Vulkan dependencies using Brew
-        if "$BREW_CMD" install vulkan-headers vulkan-loader; then
-            _log "Successfully installed vulkan-headers and vulkan-loader."
-        else
-            _log "Warning: Failed to install Vulkan dependencies via brew. Vulkan support might not be enabled correctly."
-            _log "         Please install them manually (e.g., using your system package manager like apt or dnf) and ensure pkg-config can find 'vulkan'."
-        fi
-    else
-        _log "Vulkan headers and loader already installed via brew."
-    fi
-
+    # Dependencies are now installed earlier if needed.
     # Now check if pkg-config can find vulkan after potential installation
     if pkg-config --exists vulkan; then
         _log "Vulkan SDK found via pkg-config. Enabling Vulkan support and adding paths."
