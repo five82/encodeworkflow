@@ -255,9 +255,12 @@ if [[ "$OS_NAME" == "Linux" ]]; then
     # Add rpath to LDFLAGS, ensuring space if Vulkan flags were added
     # This should be INSIDE the Linux block
     if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-        EXTRA_LDFLAGS_VAL+=" " # Add space separator
+        EXTRA_LDFLAGS_VAL+=" " # Add space separator if Vulkan flags were added
     fi
-fi # End of Linux-specific block
+elif [[ "$OS_NAME" == "Darwin" ]]; then
+    _log "macOS detected: Enabling VideoToolbox support."
+    FFMPEG_EXTRA_FLAGS="--enable-videotoolbox"
+fi # End of OS-specific block
 
 # Add rpath to LDFLAGS for both Linux and macOS to find libs in INSTALL_PREFIX
 if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
