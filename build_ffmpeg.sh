@@ -43,96 +43,81 @@ trap 'echo "Error on line $LINENO"; exit 1' ERR
 
 # --- OS Detection & Setup ---
 OS_NAME=$(uname -s)
-BREW_CMD=""
 CPU_COUNT=""
 
 _log "Detected OS: $OS_NAME"
 
 if [[ "$OS_NAME" == "Darwin" ]]; then
     _log "Setting up for macOS (Homebrew)"
-    BREW_CMD="brew"
+    # Assuming brew is installed and needed dependencies are handled manually or via brew
     CPU_COUNT=$(sysctl -n hw.ncpu)
+    _log "Error: This script is now primarily focused on Debian. macOS support via brew removed."
+    exit 1
 elif [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Setting up for Linux (Linuxbrew)"
-    # Check for Debian specifically if needed, but Linuxbrew path is the main goal
+    _log "Setting up for Linux (Debian/apt)"
     if [[ -f /etc/debian_version ]]; then
         _log "Debian detected."
+        CPU_COUNT=$(nproc)
+
+        # --- Install Dependencies via apt ---
+        _log "Checking/installing required Debian packages via apt..."
+        REQUIRED_PKGS=(
+            build-essential # Common build tools (make, gcc, etc.)
+            cmake
+            nasm
+            yasm # Often needed by FFmpeg assembly
+            pkg-config
+            git
+            wget
+            autoconf
+            automake
+            libtool
+            clang # Use system clang
+            libvulkan-dev
+            libplacebo-dev
+            libshaderc-dev
+            liblcms2-dev
+        )
+        PACKAGES_TO_INSTALL=()
+        for pkg in "${REQUIRED_PKGS[@]}"; do
+            if dpkg -s "$pkg" &> /dev/null; then
+                _log "$pkg is already installed."
+            else
+                _log "$pkg is NOT installed."
+                PACKAGES_TO_INSTALL+=("$pkg")
+            fi
+        done
+
+        if [ ${#PACKAGES_TO_INSTALL[@]} -gt 0 ]; then
+            _log "The following required Debian packages are missing: ${PACKAGES_TO_INSTALL[*]}"
+            if command -v sudo &> /dev/null; then
+                 _log "Attempting to install missing packages using: sudo apt update && sudo apt install -y ${PACKAGES_TO_INSTALL[*]}"
+                 # Run non-interactively if possible
+                 export DEBIAN_FRONTEND=noninteractive
+                 if sudo apt update && sudo apt install -y "${PACKAGES_TO_INSTALL[@]}"; then
+                      _log "Successfully installed missing Debian packages."
+                 else
+                      _log "Error: Failed to install required Debian packages using apt. Please install them manually."
+                      exit 1
+                 fi
+            else
+                 _log "Error: sudo command not found. Please install the following packages manually using apt: ${PACKAGES_TO_INSTALL[*]}"
+                 exit 1
+            fi
+        fi
+        _log "Required Debian packages check complete."
+
+    else
+        _log "Error: Non-Debian Linux detected. This script now requires Debian/apt."
+        exit 1
     fi
-    # Standard Linuxbrew path or fallback to Homebrew path if installed differently
-    if [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-         BREW_CMD="/home/linuxbrew/.linuxbrew/bin/brew"
-    elif command -v brew &> /dev/null; then
-         BREW_CMD="brew" # Assume brew is in PATH if not in default Linuxbrew location
-    fi
-    CPU_COUNT=$(nproc)
 else
     _log "Error: Unsupported operating system '$OS_NAME'."
     exit 1
 fi
 
-if [[ -z "$BREW_CMD" ]]; then
-     _log "Error: brew command not found. Please install Homebrew (macOS) or Linuxbrew (Debian)."
-     _log "macOS: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-     _log "Debian/Linux: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-     exit 1
-fi
-
-_log "Using brew command: $BREW_CMD"
 _log "Using CPU cores: $CPU_COUNT"
-
-# --- Update Brew ---
-_log "Updating brew..."
-"$BREW_CMD" update || _log "Warning: Brew update failed, continuing..."
-
-# --- Install Dependencies ---
-_log "Installing dependencies..."
-DEPS=(
-    cmake
-    nasm
-    pkg-config
-    git # For cloning ffmpeg source
-    wget # For opus model download
-    autoconf # For opus autogen.sh
-    automake # For opus autogen.sh
-    libtool # For opus autogen.sh
-    llvm # Provides clang/clang++, required for SVT-AV1 build
-    # svt-av1 and opus will be built from source
-)
-
-for dep in "${DEPS[@]}"; do
-    if "$BREW_CMD" list "$dep" &> /dev/null; then
-        _log "$dep is already installed."
-    else
-        _log "Installing $dep..."
-        "$BREW_CMD" install "$dep"
-    fi
-done
-
-_log "Dependencies installed."
-# --- Install Linux-specific Dependencies ---
-if [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Installing Linux-specific dependencies..."
-    LINUX_DEPS=(
-        vulkan-headers
-        vulkan-loader
-    )
-    for dep in "${LINUX_DEPS[@]}"; do
-        if "$BREW_CMD" list "$dep" &> /dev/null; then
-            _log "$dep is already installed."
-        else
-            _log "Installing $dep..."
-            if "$BREW_CMD" install "$dep"; then
-                 _log "Successfully installed $dep."
-            else
-                 _log "Warning: Failed to install $dep via brew."
-                 _log "         Vulkan support might not be enabled correctly."
-                 _log "         Please install it manually (e.g., using your system package manager like apt or dnf) and ensure pkg-config can find 'vulkan'."
-                 # Decide if we should exit here or just warn. Warning seems better.
-            fi
-        fi
-    done
-    _log "Linux-specific dependencies check complete."
-fi
+# Brew logic removed
 
 # --- Environment Configuration ---
 # No custom environment needed for standard /usr/local shared build
@@ -155,21 +140,14 @@ cd SVT-AV1
 _log "Configuring SVT-AV1..."
 mkdir -p Build # Use standard CMake build directory convention
 cd Build
-# Get the path to the installed llvm to find clang
-LLVM_PREFIX=$("$BREW_CMD" --prefix llvm)
-_log "Using llvm prefix: $LLVM_PREFIX"
-if [[ -z "$LLVM_PREFIX" || ! -d "$LLVM_PREFIX/bin" ]]; then
-    _log "Error: Could not find llvm prefix or its bin directory. Ensure llvm is installed correctly."
-    exit 1
-fi
-CLANG_PATH="$LLVM_PREFIX/bin/clang"
-CLANGPP_PATH="$LLVM_PREFIX/bin/clang++"
+# Use system clang/clang++ (should be in PATH after installing build-essential/clang)
+_log "Using system clang/clang++"
+CLANG_PATH=$(command -v clang)
+CLANGPP_PATH=$(command -v clang++)
 if [[ ! -x "$CLANG_PATH" || ! -x "$CLANGPP_PATH" ]]; then
-    _log "Error: clang ($CLANG_PATH) or clang++ ($CLANGPP_PATH) not found or not executable in llvm prefix."
+    _log "Error: clang or clang++ not found in PATH. Ensure 'clang' package is installed correctly."
     exit 1
 fi
-_log "Using clang: $CLANG_PATH"
-_log "Using clang++: $CLANGPP_PATH"
 
 cmake .. \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
@@ -218,8 +196,18 @@ git clone --depth 1 --branch "$FFMPEG_BRANCH" "$FFMPEG_REPO" ffmpeg
 cd ffmpeg
 
 # Ensure pkg-config finds the libraries installed in the custom prefix
-export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+# Ensure pkg-config finds libraries installed in our custom prefix
+# Explicitly add system pkgconfig path and custom prefix path
+SYSTEM_PKGCONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" # Common system paths
+export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${SYSTEM_PKGCONFIG_PATH}:${PKG_CONFIG_PATH:-}"
 _log "PKG_CONFIG_PATH set to: $PKG_CONFIG_PATH"
+# Also ensure PKG_CONFIG points to the system version if it exists
+if command -v /usr/bin/pkg-config &> /dev/null; then
+    export PKG_CONFIG=/usr/bin/pkg-config
+    _log "Explicitly using PKG_CONFIG=$PKG_CONFIG"
+else
+    _log "Warning: /usr/bin/pkg-config not found, relying on default pkg-config in PATH."
+fi
 
 # --- Add OS-specific flags ---
 FFMPEG_EXTRA_FLAGS=""
@@ -229,34 +217,17 @@ if [[ "$OS_NAME" == "Linux" ]]; then
     _log "Linux detected: Checking for Vulkan support..."
     # Dependencies are now installed earlier if needed.
     # Now check if pkg-config can find vulkan after potential installation
-    if pkg-config --exists vulkan; then
-        _log "Vulkan SDK found via pkg-config. Enabling Vulkan support and adding paths."
+    # Check if system Vulkan is available (libvulkan-dev should provide vulkan.pc)
+    # Use the system's pkg-config, not necessarily brew's, for system libs
+    if command -v pkg-config &> /dev/null && pkg-config --exists vulkan; then
+        _log "System Vulkan SDK found via pkg-config. Enabling Vulkan support."
         FFMPEG_EXTRA_FLAGS="--enable-vulkan"
-        # Explicitly provide paths for configure script
-        VULKAN_HEADERS_PREFIX=$("$BREW_CMD" --prefix vulkan-headers)
-        VULKAN_LOADER_PREFIX=$("$BREW_CMD" --prefix vulkan-loader)
-        if [[ -n "$VULKAN_HEADERS_PREFIX" && -d "$VULKAN_HEADERS_PREFIX/include" ]]; then
-             EXTRA_CFLAGS_VAL+="-I${VULKAN_HEADERS_PREFIX}/include" # No leading/trailing space needed here
-             _log "Adding Vulkan include path: ${EXTRA_CFLAGS_VAL}"
-        else
-            _log "Warning: Could not find vulkan-headers include directory via brew prefix."
-        fi
-        if [[ -n "$VULKAN_LOADER_PREFIX" && -d "$VULKAN_LOADER_PREFIX/lib" ]]; then
-             EXTRA_LDFLAGS_VAL+="-L${VULKAN_LOADER_PREFIX}/lib" # No leading/trailing space needed here
-             _log "Adding Vulkan library path: ${EXTRA_LDFLAGS_VAL}"
-        else
-             _log "Warning: Could not find vulkan-loader lib directory via brew prefix."
-        fi
+        # No need to add explicit CFLAGS/LDFLAGS, system paths should work
     else
-        _log "Warning: Vulkan SDK not found via pkg-config even after attempting install. Skipping --enable-vulkan."
-        _log "         Ensure Vulkan development libraries are installed and discoverable by pkg-config."
+        _log "Warning: System Vulkan SDK not found via pkg-config. Skipping --enable-vulkan."
+        _log "         Ensure 'libvulkan-dev' (or equivalent) is installed via apt."
     fi
-
-    # Add rpath to LDFLAGS, ensuring space if Vulkan flags were added
-    # This should be INSIDE the Linux block
-    if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-        EXTRA_LDFLAGS_VAL+=" " # Add space separator if Vulkan flags were added
-    fi
+    # No specific LDFLAGS needed here for system Vulkan
 elif [[ "$OS_NAME" == "Darwin" ]]; then
     _log "macOS detected: Enabling VideoToolbox support."
     FFMPEG_EXTRA_FLAGS="--enable-videotoolbox"
@@ -281,14 +252,19 @@ CONFIGURE_ARGS=(
     --disable-vaapi
     --disable-vdpau
     --disable-libdrm
+    --enable-libshaderc # Dependency for libplacebo
+    --enable-lcms2      # Dependency for libplacebo
 )
 
 # Add conditional flags to the array
-if [[ -n "$EXTRA_CFLAGS_VAL" ]]; then
-    CONFIGURE_ARGS+=(--extra-cflags="$EXTRA_CFLAGS_VAL")
-fi
+# Removed empty if block for EXTRA_CFLAGS_VAL
 if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-    CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL")
+    # CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL") # Removed, using system paths + rpath below
+    # Keep the rpath for libs installed in INSTALL_PREFIX (svt-av1, opus)
+    CONFIGURE_ARGS+=(--extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib")
+else
+    # Add rpath even if no other LDFLAGS were set
+    CONFIGURE_ARGS+=(--extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib")
 fi
 if [[ -n "$FFMPEG_EXTRA_FLAGS" ]]; then
     # Split FFMPEG_EXTRA_FLAGS in case it contains multiple flags in the future
@@ -299,6 +275,7 @@ fi
 # --- Execute configure ---
 _log "Executing configure with arguments:"
 printf "  %s\n" "${CONFIGURE_ARGS[@]}" # Log arguments for debugging
+# PKG_CONFIG should be set correctly above or found in PATH
 ./configure "${CONFIGURE_ARGS[@]}"
 
 _log "FFmpeg configuration complete."
