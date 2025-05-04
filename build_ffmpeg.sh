@@ -193,35 +193,95 @@ cd "$BUILD_DIR" # Go back to build dir
 git clone --depth 1 --branch "$FFMPEG_BRANCH" "$FFMPEG_REPO" ffmpeg
 cd ffmpeg
 
-# --- Configure FFmpeg ---
-PKG_CONFIG_BIN=$(command -v pkg-config)
-if [[ -z "$PKG_CONFIG_BIN" ]]; then
-    _log "Error: pkg-config command not found in PATH."
-    exit 1
-fi
-_log "Using pkg-config executable: $PKG_CONFIG_BIN"
-_log "Running pkg-config check for SvtAv1Enc..."
-pkg-config --exists --print-errors "SvtAv1Enc >= 0.9.0" || _log "pkg-config check failed!"
-_log "pkg-config check complete."
-_log "Configuring FFmpeg..."
-
 # Ensure pkg-config finds the libraries installed in the custom prefix
 export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 _log "PKG_CONFIG_PATH set to: $PKG_CONFIG_PATH"
 
-./configure \
-    --prefix="$INSTALL_PREFIX" \
-    --disable-static \
-    --enable-shared \
-    --enable-gpl \
-    --enable-libsvtav1 \
-    --enable-libopus \
-    --disable-xlib \
-    --disable-libxcb \
-    --disable-vaapi \
-    --disable-vdpau \
-    --disable-libdrm \
-    --extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib" # Add RPATH for shared libs
+# --- Add OS-specific flags ---
+FFMPEG_EXTRA_FLAGS=""
+EXTRA_CFLAGS_VAL="" # Use different var names to avoid confusion
+EXTRA_LDFLAGS_VAL=""
+if [[ "$OS_NAME" == "Linux" ]]; then
+    _log "Linux detected: Checking for Vulkan support..."
+    # Check if Vulkan SDK headers/loader are installed via Brew
+    if ! "$BREW_CMD" list vulkan-headers &> /dev/null || ! "$BREW_CMD" list vulkan-loader &> /dev/null; then
+        _log "Vulkan headers/loader not found via brew. Attempting installation..."
+        # Attempt to install Vulkan dependencies using Brew
+        if "$BREW_CMD" install vulkan-headers vulkan-loader; then
+            _log "Successfully installed vulkan-headers and vulkan-loader."
+        else
+            _log "Warning: Failed to install Vulkan dependencies via brew. Vulkan support might not be enabled correctly."
+            _log "         Please install them manually (e.g., using your system package manager like apt or dnf) and ensure pkg-config can find 'vulkan'."
+        fi
+    else
+        _log "Vulkan headers and loader already installed via brew."
+    fi
+
+    # Now check if pkg-config can find vulkan after potential installation
+    if pkg-config --exists vulkan; then
+        _log "Vulkan SDK found via pkg-config. Enabling Vulkan support and adding paths."
+        FFMPEG_EXTRA_FLAGS="--enable-vulkan"
+        # Explicitly provide paths for configure script
+        VULKAN_HEADERS_PREFIX=$("$BREW_CMD" --prefix vulkan-headers)
+        VULKAN_LOADER_PREFIX=$("$BREW_CMD" --prefix vulkan-loader)
+        if [[ -n "$VULKAN_HEADERS_PREFIX" && -d "$VULKAN_HEADERS_PREFIX/include" ]]; then
+             EXTRA_CFLAGS_VAL+="-I${VULKAN_HEADERS_PREFIX}/include" # No leading/trailing space needed here
+             _log "Adding Vulkan include path: ${EXTRA_CFLAGS_VAL}"
+        else
+            _log "Warning: Could not find vulkan-headers include directory via brew prefix."
+        fi
+        if [[ -n "$VULKAN_LOADER_PREFIX" && -d "$VULKAN_LOADER_PREFIX/lib" ]]; then
+             EXTRA_LDFLAGS_VAL+="-L${VULKAN_LOADER_PREFIX}/lib" # No leading/trailing space needed here
+             _log "Adding Vulkan library path: ${EXTRA_LDFLAGS_VAL}"
+        else
+             _log "Warning: Could not find vulkan-loader lib directory via brew prefix."
+        fi
+    else
+        _log "Warning: Vulkan SDK not found via pkg-config even after attempting install. Skipping --enable-vulkan."
+        _log "         Ensure Vulkan development libraries are installed and discoverable by pkg-config."
+    fi
+
+    # Add rpath to LDFLAGS, ensuring space if Vulkan flags were added
+    # This should be INSIDE the Linux block
+    if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
+        EXTRA_LDFLAGS_VAL+=" " # Add space separator
+    fi
+    EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib"
+
+fi # End of Linux-specific block
+
+# --- Build configure arguments array ---
+CONFIGURE_ARGS=(
+    --prefix="$INSTALL_PREFIX"
+    --disable-static
+    --enable-shared
+    --enable-gpl
+    --enable-libsvtav1
+    --enable-libopus
+    --disable-xlib
+    --disable-libxcb
+    --disable-vaapi
+    --disable-vdpau
+    --disable-libdrm
+)
+
+# Add conditional flags to the array
+if [[ -n "$EXTRA_CFLAGS_VAL" ]]; then
+    CONFIGURE_ARGS+=(--extra-cflags="$EXTRA_CFLAGS_VAL")
+fi
+if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
+    CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL")
+fi
+if [[ -n "$FFMPEG_EXTRA_FLAGS" ]]; then
+    # Split FFMPEG_EXTRA_FLAGS in case it contains multiple flags in the future
+    read -ra flags <<< "$FFMPEG_EXTRA_FLAGS"
+    CONFIGURE_ARGS+=("${flags[@]}")
+fi
+
+# --- Execute configure ---
+_log "Executing configure with arguments:"
+printf "  %s\n" "${CONFIGURE_ARGS[@]}" # Log arguments for debugging
+./configure "${CONFIGURE_ARGS[@]}"
 
 _log "FFmpeg configuration complete."
 
