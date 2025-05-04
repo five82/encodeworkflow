@@ -257,9 +257,13 @@ if [[ "$OS_NAME" == "Linux" ]]; then
     if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
         EXTRA_LDFLAGS_VAL+=" " # Add space separator
     fi
-    EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib"
-
 fi # End of Linux-specific block
+
+# Add rpath to LDFLAGS for both Linux and macOS to find libs in INSTALL_PREFIX
+if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
+    EXTRA_LDFLAGS_VAL+=" " # Add space separator if needed (e.g., after Linux Vulkan flags)
+fi
+EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib"
 
 # --- Build configure arguments array ---
 CONFIGURE_ARGS=(
