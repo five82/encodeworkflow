@@ -2,7 +2,7 @@
 
 # build_ffmpeg.sh
 # Builds FFmpeg binaries on macOS (Homebrew) or Debian (Linuxbrew)
-# Includes: libsvtav1, libopus
+# Includes: libsvtav1, libopus, libdav1d
 
 # --- Configuration ---
 INSTALL_PREFIX="$HOME/.local" # Install into user's local directory
@@ -14,6 +14,8 @@ SVT_AV1_REPO="https://github.com/BlueSwordM/svt-av1-psyex.git" # svt-av1-psyex
 SVT_AV1_BRANCH="master"
 OPUS_REPO="https://gitlab.xiph.org/xiph/opus.git"
 OPUS_BRANCH="main"
+DAV1D_REPO="https://code.videolan.org/videolan/dav1d.git"
+DAV1D_BRANCH="master"
 
 # --- Helper Functions ---
 _log() {
@@ -77,6 +79,8 @@ elif [[ "$OS_NAME" == "Linux" ]]; then
             libplacebo-dev
             libshaderc-dev
             liblcms2-dev
+            meson # Required for dav1d
+            ninja-build # Required for dav1d
         )
         PACKAGES_TO_INSTALL=()
         for pkg in "${REQUIRED_PKGS[@]}"; do
@@ -130,6 +134,7 @@ mkdir -p "$INSTALL_PREFIX"
 rm -rf "$BUILD_DIR/ffmpeg" # Clean previous ffmpeg source attempt
 rm -rf "$BUILD_DIR/SVT-AV1" # Clean previous svt-av1 source attempt
 rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
+rm -rf "$BUILD_DIR/dav1d" # Clean previous dav1d source attempt
 
 # --- Build SVT-AV1 from Source ---
 _log "Cloning SVT-AV1 source (branch: $SVT_AV1_BRANCH)..."
@@ -187,6 +192,28 @@ make -j"$CPU_COUNT"
 _log "Installing opus..."
 make install # No sudo needed for $HOME/.local
 _log "opus installation complete."
+
+# --- Build dav1d from Source ---
+_log "Cloning dav1d source (branch: $DAV1D_BRANCH)..."
+cd "$BUILD_DIR"
+git clone --depth 1 --branch "$DAV1D_BRANCH" "$DAV1D_REPO" dav1d
+cd dav1d
+
+_log "Configuring dav1d..."
+mkdir -p build
+cd build
+meson setup .. \
+    --prefix="$INSTALL_PREFIX" \
+    --buildtype=release \
+    --default-library=shared \
+    -Denable_tools=false \
+    -Denable_tests=false
+
+_log "Building dav1d (using $CPU_COUNT cores)..."
+ninja -j"$CPU_COUNT"
+_log "Installing dav1d..."
+ninja install # No sudo needed for $HOME/.local
+_log "dav1d installation complete."
 
 
 # --- Download FFmpeg ---
@@ -247,6 +274,7 @@ CONFIGURE_ARGS=(
     --enable-gpl
     --enable-libsvtav1
     --enable-libopus
+    --enable-libdav1d
     --disable-xlib
     --disable-libxcb
     --disable-vaapi
