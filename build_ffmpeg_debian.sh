@@ -226,7 +226,8 @@ cd ffmpeg
 # Ensure pkg-config finds libraries installed in our custom prefix
 # Explicitly add system pkgconfig path and custom prefix path
 SYSTEM_PKGCONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" # Common system paths
-export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${SYSTEM_PKGCONFIG_PATH}:${PKG_CONFIG_PATH:-}"
+# Include both standard and architecture-specific paths for the custom prefix
+export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/x86_64-linux-gnu/pkgconfig:${INSTALL_PREFIX}/lib/pkgconfig:${SYSTEM_PKGCONFIG_PATH}:${PKG_CONFIG_PATH:-}"
 _log "PKG_CONFIG_PATH set to: $PKG_CONFIG_PATH"
 # Also ensure PKG_CONFIG points to the system version if it exists
 if command -v /usr/bin/pkg-config &> /dev/null; then
@@ -264,7 +265,7 @@ fi # End of OS-specific block
 if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
     EXTRA_LDFLAGS_VAL+=" " # Add space separator if needed (e.g., after Linux Vulkan flags)
 fi
-EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib"
+EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib:${INSTALL_PREFIX}/lib/x86_64-linux-gnu"
 
 # --- Build configure arguments array ---
 CONFIGURE_ARGS=(
@@ -287,12 +288,11 @@ CONFIGURE_ARGS=(
 # Add conditional flags to the array
 # Removed empty if block for EXTRA_CFLAGS_VAL
 if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-    # CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL") # Removed, using system paths + rpath below
-    # Keep the rpath for libs installed in INSTALL_PREFIX (svt-av1, opus)
-    CONFIGURE_ARGS+=(--extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib")
+    # Use the EXTRA_LDFLAGS_VAL which includes the correct rpath
+    CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL")
 else
-    # Add rpath even if no other LDFLAGS were set
-    CONFIGURE_ARGS+=(--extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib")
+    # This should not happen since we always set EXTRA_LDFLAGS_VAL above
+    CONFIGURE_ARGS+=(--extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib:${INSTALL_PREFIX}/lib/x86_64-linux-gnu")
 fi
 if [[ -n "$FFMPEG_EXTRA_FLAGS" ]]; then
     # Split FFMPEG_EXTRA_FLAGS in case it contains multiple flags in the future
