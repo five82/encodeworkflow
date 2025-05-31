@@ -16,6 +16,8 @@ OPUS_REPO="https://gitlab.xiph.org/xiph/opus.git"
 OPUS_BRANCH="main"
 DAV1D_REPO="https://code.videolan.org/videolan/dav1d.git"
 DAV1D_BRANCH="master"
+VMAF_REPO="https://github.com/Netflix/vmaf.git"
+VMAF_BRANCH="master"
 
 # --- Helper Functions ---
 _log() {
@@ -135,6 +137,7 @@ rm -rf "$BUILD_DIR/ffmpeg" # Clean previous ffmpeg source attempt
 rm -rf "$BUILD_DIR/SVT-AV1" # Clean previous svt-av1 source attempt
 rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
 rm -rf "$BUILD_DIR/dav1d" # Clean previous dav1d source attempt
+rm -rf "$BUILD_DIR/vmaf" # Clean previous vmaf source attempt
 
 # --- Build SVT-AV1 from Source ---
 _log "Cloning SVT-AV1 source (branch: $SVT_AV1_BRANCH)..."
@@ -215,6 +218,29 @@ _log "Installing dav1d..."
 ninja install # No sudo needed for $HOME/.local
 _log "dav1d installation complete."
 
+# --- Build vmaf from Source ---
+_log "Cloning vmaf source (branch: $VMAF_BRANCH)..."
+cd "$BUILD_DIR"
+git clone --depth 1 --branch "$VMAF_BRANCH" "$VMAF_REPO" vmaf
+cd vmaf/libvmaf
+
+_log "Configuring vmaf..."
+mkdir -p build
+cd build
+meson setup .. \
+    --prefix="$INSTALL_PREFIX" \
+    --buildtype=release \
+    --default-library=shared \
+    -Denable_tests=false \
+    -Denable_docs=false \
+    -Dbuilt_in_models=true
+
+_log "Building vmaf (using $CPU_COUNT cores)..."
+ninja -j"$CPU_COUNT"
+_log "Installing vmaf..."
+ninja install # No sudo needed for $HOME/.local
+_log "vmaf installation complete."
+
 
 # --- Download FFmpeg ---
 _log "Downloading FFmpeg source (branch: $FFMPEG_BRANCH)..."
@@ -276,6 +302,7 @@ CONFIGURE_ARGS=(
     --enable-libsvtav1
     --enable-libopus
     --enable-libdav1d
+    --enable-libvmaf
     --disable-xlib
     --disable-libxcb
     --disable-vaapi
