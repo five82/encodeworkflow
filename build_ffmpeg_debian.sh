@@ -18,6 +18,8 @@ DAV1D_REPO="https://code.videolan.org/videolan/dav1d.git"
 DAV1D_BRANCH="master"
 VMAF_REPO="https://github.com/Netflix/vmaf.git"
 VMAF_BRANCH="master"
+X265_REPO="https://bitbucket.org/multicoreware/x265_git.git"
+X265_BRANCH="master"
 
 # --- Helper Functions ---
 _log() {
@@ -138,6 +140,7 @@ rm -rf "$BUILD_DIR/SVT-AV1" # Clean previous svt-av1 source attempt
 rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
 rm -rf "$BUILD_DIR/dav1d" # Clean previous dav1d source attempt
 rm -rf "$BUILD_DIR/vmaf" # Clean previous vmaf source attempt
+rm -rf "$BUILD_DIR/x265" # Clean previous x265 source attempt
 
 # --- Build SVT-AV1 from Source ---
 _log "Cloning SVT-AV1 source (branch: $SVT_AV1_BRANCH)..."
@@ -241,6 +244,50 @@ _log "Installing vmaf..."
 ninja install # No sudo needed for $HOME/.local
 _log "vmaf installation complete."
 
+# --- Build x265 from Source ---
+_log "Cloning x265 source (branch: $X265_BRANCH)..."
+cd "$BUILD_DIR"
+git clone --depth 1 --branch "$X265_BRANCH" "$X265_REPO" x265
+cd x265/build/linux
+
+_log "Configuring x265..."
+cmake -G "Unix Makefiles" ../../source \
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DENABLE_SHARED=ON \
+    -DSTATIC_LINK_CRT=OFF \
+    -DENABLE_CLI=OFF \
+    -DENABLE_LIBNUMA=OFF \
+    -DENABLE_HDR10_PLUS=ON
+
+_log "Building x265 (using $CPU_COUNT cores)..."
+make -j"$CPU_COUNT"
+_log "Installing x265..."
+make install # No sudo needed for $HOME/.local
+
+# x265 doesn't always create a proper pkg-config file, so we create one
+_log "Creating x265 pkg-config file..."
+mkdir -p "$INSTALL_PREFIX/lib/pkgconfig"
+
+# Get the actual version from x265_config.h
+X265_VERSION=$(grep "X265_VERSION_STR" "$INSTALL_PREFIX/include/x265_config.h" | cut -d'"' -f2 | head -1) || X265_VERSION="3.6"
+
+cat > "$INSTALL_PREFIX/lib/pkgconfig/x265.pc" << EOF
+prefix=$INSTALL_PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: x265
+Description: H.265/HEVC video encoder
+Version: $X265_VERSION
+Libs: -L\${libdir} -lx265
+Libs.private: -lstdc++ -lm -lpthread -ldl -lrt
+Cflags: -I\${includedir}
+EOF
+
+_log "x265 installation complete."
+
 
 # --- Download FFmpeg ---
 _log "Downloading FFmpeg source (branch: $FFMPEG_BRANCH)..."
@@ -303,6 +350,7 @@ CONFIGURE_ARGS=(
     --enable-libopus
     --enable-libdav1d
     --enable-libvmaf
+    --enable-libx265
     --disable-xlib
     --disable-libxcb
     --disable-vaapi
