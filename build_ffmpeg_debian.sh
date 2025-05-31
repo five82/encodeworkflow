@@ -20,6 +20,8 @@ VMAF_REPO="https://github.com/Netflix/vmaf.git"
 VMAF_BRANCH="master"
 X265_REPO="https://bitbucket.org/multicoreware/x265_git.git"
 X265_BRANCH="master"
+ZIMG_REPO="https://github.com/sekrit-twc/zimg.git"
+ZIMG_BRANCH="master"
 
 # --- Helper Functions ---
 _log() {
@@ -141,6 +143,7 @@ rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
 rm -rf "$BUILD_DIR/dav1d" # Clean previous dav1d source attempt
 rm -rf "$BUILD_DIR/vmaf" # Clean previous vmaf source attempt
 rm -rf "$BUILD_DIR/x265" # Clean previous x265 source attempt
+rm -rf "$BUILD_DIR/zimg" # Clean previous zimg source attempt
 
 # --- Build SVT-AV1 from Source ---
 _log "Cloning SVT-AV1 source (branch: $SVT_AV1_BRANCH)..."
@@ -288,6 +291,29 @@ EOF
 
 _log "x265 installation complete."
 
+# --- Build zimg from Source ---
+_log "Cloning zimg source (branch: $ZIMG_BRANCH)..."
+cd "$BUILD_DIR"
+git clone --depth 1 --branch "$ZIMG_BRANCH" "$ZIMG_REPO" zimg
+cd zimg
+
+# Initialize submodules (required for zimg build)
+_log "Initializing zimg submodules..."
+git submodule update --init --recursive
+
+_log "Configuring zimg..."
+./autogen.sh
+./configure \
+    --prefix="$INSTALL_PREFIX" \
+    --disable-static \
+    --enable-shared
+
+_log "Building zimg (using $CPU_COUNT cores)..."
+make -j"$CPU_COUNT"
+_log "Installing zimg..."
+make install # No sudo needed for $HOME/.local
+_log "zimg installation complete."
+
 
 # --- Download FFmpeg ---
 _log "Downloading FFmpeg source (branch: $FFMPEG_BRANCH)..."
@@ -351,6 +377,7 @@ CONFIGURE_ARGS=(
     --enable-libdav1d
     --enable-libvmaf
     --enable-libx265
+    --enable-libzimg
     --disable-xlib
     --disable-libxcb
     --disable-vaapi
