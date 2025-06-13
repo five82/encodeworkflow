@@ -34,7 +34,6 @@
 #   - macOS with Homebrew installed
 #   - Internet connection to download source code
 #
-# Author: Ken
 #==============================================================================
 
 #------------------------------------------------------------------------------
@@ -45,7 +44,8 @@ INSTALL_PREFIX="$HOME/.local"        # Installation directory (user-specific)
 BUILD_DIR="/tmp/ffmpeg_build_temp"   # Temporary build directory
 FFMPEG_REPO="https://github.com/FFmpeg/FFmpeg.git"
 FFMPEG_BRANCH="master"
-SVT_AV1_REPO="https://github.com/BlueSwordM/svt-av1-psyex.git"  # Psychovisual optimized fork
+SVT_AV1_REPO="https://gitlab.com/AOMediaCodec/SVT-AV1.git"  # svt-av1
+#SVT_AV1_REPO="https://github.com/BlueSwordM/svt-av1-psyex.git"  # svt-av1-psyex
 SVT_AV1_BRANCH="master"
 OPUS_REPO="https://gitlab.xiph.org/xiph/opus.git"
 OPUS_BRANCH="main"
