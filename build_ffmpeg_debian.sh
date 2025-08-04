@@ -2,7 +2,7 @@
 
 # build_ffmpeg_debian.sh
 # Builds FFmpeg binaries on Debian Linux
-# Includes: libsvtav1, libopus, libdav1d, libvmaf, libx265, libzimg
+# Includes: libsvtav1, libopus, libdav1d, libx265, libzimg
 
 # --- Configuration ---
 INSTALL_PREFIX="$HOME/.local" # Install into user's local directory
@@ -16,8 +16,6 @@ OPUS_REPO="https://github.com/xiph/opus.git"
 OPUS_BRANCH="main"
 DAV1D_REPO="https://code.videolan.org/videolan/dav1d.git"
 DAV1D_BRANCH="master"
-VMAF_REPO="https://github.com/Netflix/vmaf.git"
-VMAF_BRANCH="master"
 X265_REPO="https://bitbucket.org/multicoreware/x265_git.git"
 X265_BRANCH="master"
 ZIMG_REPO="https://github.com/sekrit-twc/zimg.git"
@@ -132,7 +130,6 @@ rm -rf "$BUILD_DIR/ffmpeg" # Clean previous ffmpeg source attempt
 rm -rf "$BUILD_DIR/SVT-AV1" # Clean previous svt-av1 source attempt
 rm -rf "$BUILD_DIR/opus" # Clean previous opus source attempt
 rm -rf "$BUILD_DIR/dav1d" # Clean previous dav1d source attempt
-rm -rf "$BUILD_DIR/vmaf" # Clean previous vmaf source attempt
 rm -rf "$BUILD_DIR/x265" # Clean previous x265 source attempt
 rm -rf "$BUILD_DIR/zimg" # Clean previous zimg source attempt
 
@@ -214,29 +211,6 @@ ninja -j"$CPU_COUNT"
 _log "Installing dav1d..."
 ninja install # No sudo needed for $HOME/.local
 _log "dav1d installation complete."
-
-# --- Build vmaf from Source ---
-_log "Cloning vmaf source (branch: $VMAF_BRANCH)..."
-cd "$BUILD_DIR"
-git clone --depth 1 --branch "$VMAF_BRANCH" "$VMAF_REPO" vmaf
-cd vmaf/libvmaf
-
-_log "Configuring vmaf..."
-mkdir -p build
-cd build
-meson setup .. \
-    --prefix="$INSTALL_PREFIX" \
-    --buildtype=release \
-    --default-library=shared \
-    -Denable_tests=false \
-    -Denable_docs=false \
-    -Dbuilt_in_models=true
-
-_log "Building vmaf (using $CPU_COUNT cores)..."
-ninja -j"$CPU_COUNT"
-_log "Installing vmaf..."
-ninja install # No sudo needed for $HOME/.local
-_log "vmaf installation complete."
 
 # --- Build x265 from Source ---
 _log "Cloning x265 source (branch: $X265_BRANCH)..."
@@ -351,7 +325,6 @@ CONFIGURE_ARGS=(
     --enable-libsvtav1
     --enable-libopus
     --enable-libdav1d
-    --enable-libvmaf
     --enable-libx265
     --enable-libzimg
     --disable-xlib
