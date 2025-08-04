@@ -73,10 +73,10 @@ if [[ "$OS_NAME" == "Linux" ]]; then
             automake
             libtool
             clang # Use system clang
-            libvulkan-dev
-            libplacebo-dev
-            libshaderc-dev
-            liblcms2-dev
+            libva-dev
+            libva-drm2
+            libva-x11-2
+            libva2
             meson # Required for dav1d
             ninja-build # Required for dav1d
         )
@@ -327,16 +327,16 @@ else
     _log "Warning: /usr/bin/pkg-config not found, relying on default pkg-config in PATH."
 fi
 
-# --- Add Vulkan support if available ---
+# --- Add VAAPI support if available ---
 FFMPEG_EXTRA_FLAGS=""
 EXTRA_LDFLAGS_VAL=""
-_log "Checking for Vulkan support..."
-if command -v pkg-config &> /dev/null && pkg-config --exists vulkan; then
-    _log "System Vulkan SDK found via pkg-config. Enabling Vulkan support."
-    FFMPEG_EXTRA_FLAGS="--enable-vulkan"
+_log "Checking for VAAPI support..."
+if command -v pkg-config &> /dev/null && pkg-config --exists libva; then
+    _log "System VAAPI found via pkg-config. Enabling VAAPI support."
+    FFMPEG_EXTRA_FLAGS="--enable-vaapi"
 else
-    _log "Warning: System Vulkan SDK not found via pkg-config. Skipping --enable-vulkan."  
-    _log "         Ensure 'libvulkan-dev' (or equivalent) is installed via apt."
+    _log "Warning: System VAAPI not found via pkg-config. Skipping --enable-vaapi."
+    _log "         Ensure 'libva-dev' (or equivalent) is installed via apt."
 fi
 
 # Add rpath to LDFLAGS to find libs in INSTALL_PREFIX
@@ -356,11 +356,8 @@ CONFIGURE_ARGS=(
     --enable-libzimg
     --disable-xlib
     --disable-libxcb
-    --disable-vaapi
     --disable-vdpau
     --disable-libdrm
-    --enable-libshaderc # Dependency for libplacebo
-    --enable-lcms2      # Dependency for libplacebo
 )
 
 # Add LDFLAGS to the array
