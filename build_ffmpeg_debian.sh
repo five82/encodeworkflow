@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# build_ffmpeg.sh
-# Builds FFmpeg binaries on macOS (Homebrew) or Debian (Linuxbrew)
-# Includes: libsvtav1, libopus, libdav1d
+# build_ffmpeg_debian.sh
+# Builds FFmpeg binaries on Debian Linux
+# Includes: libsvtav1, libopus, libdav1d, libvmaf, libx265, libzimg
 
 # --- Configuration ---
 INSTALL_PREFIX="$HOME/.local" # Install into user's local directory
@@ -12,7 +12,7 @@ FFMPEG_BRANCH="master"
 SVT_AV1_REPO="https://gitlab.com/AOMediaCodec/SVT-AV1.git" # svt-av1
 #SVT_AV1_REPO="https://github.com/BlueSwordM/svt-av1-psyex.git" # svt-av1-psyex
 SVT_AV1_BRANCH="master"
-OPUS_REPO="https://gitlab.xiph.org/xiph/opus.git"
+OPUS_REPO="https://github.com/xiph/opus.git"
 OPUS_BRANCH="main"
 DAV1D_REPO="https://code.videolan.org/videolan/dav1d.git"
 DAV1D_BRANCH="master"
@@ -51,18 +51,10 @@ trap 'echo "Error on line $LINENO"; exit 1' ERR
 
 # --- OS Detection & Setup ---
 OS_NAME=$(uname -s)
-CPU_COUNT=""
 
 _log "Detected OS: $OS_NAME"
 
-if [[ "$OS_NAME" == "Darwin" ]]; then
-    _log "Setting up for macOS (Homebrew)"
-    # Assuming brew is installed and needed dependencies are handled manually or via brew
-    CPU_COUNT=$(sysctl -n hw.ncpu)
-    _log "Error: This script is now primarily focused on Debian. macOS support via brew removed."
-    exit 1
-elif [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Setting up for Linux (Debian/apt)"
+if [[ "$OS_NAME" == "Linux" ]]; then
     if [[ -f /etc/debian_version ]]; then
         _log "Debian detected."
         CPU_COUNT=$(nproc)
@@ -127,11 +119,10 @@ else
 fi
 
 _log "Using CPU cores: $CPU_COUNT"
-# Brew logic removed
 
 # --- Environment Configuration ---
-# No custom environment needed for standard /usr/local shared build
-_log "Using standard build environment for /usr/local installation."
+# No custom environment needed for standard shared build
+_log "Using standard build environment for $INSTALL_PREFIX installation."
 
 # --- Prepare Directories ---
 _log "Creating directories..."
@@ -336,35 +327,20 @@ else
     _log "Warning: /usr/bin/pkg-config not found, relying on default pkg-config in PATH."
 fi
 
-# --- Add OS-specific flags ---
+# --- Add Vulkan support if available ---
 FFMPEG_EXTRA_FLAGS=""
-EXTRA_CFLAGS_VAL="" # Use different var names to avoid confusion
 EXTRA_LDFLAGS_VAL=""
-if [[ "$OS_NAME" == "Linux" ]]; then
-    _log "Linux detected: Checking for Vulkan support..."
-    # Dependencies are now installed earlier if needed.
-    # Now check if pkg-config can find vulkan after potential installation
-    # Check if system Vulkan is available (libvulkan-dev should provide vulkan.pc)
-    # Use the system's pkg-config, not necessarily brew's, for system libs
-    if command -v pkg-config &> /dev/null && pkg-config --exists vulkan; then
-        _log "System Vulkan SDK found via pkg-config. Enabling Vulkan support."
-        FFMPEG_EXTRA_FLAGS="--enable-vulkan"
-        # No need to add explicit CFLAGS/LDFLAGS, system paths should work
-    else
-        _log "Warning: System Vulkan SDK not found via pkg-config. Skipping --enable-vulkan."
-        _log "         Ensure 'libvulkan-dev' (or equivalent) is installed via apt."
-    fi
-    # No specific LDFLAGS needed here for system Vulkan
-elif [[ "$OS_NAME" == "Darwin" ]]; then
-    _log "macOS detected: Enabling VideoToolbox support."
-    FFMPEG_EXTRA_FLAGS="--enable-videotoolbox"
-fi # End of OS-specific block
-
-# Add rpath to LDFLAGS for both Linux and macOS to find libs in INSTALL_PREFIX
-if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-    EXTRA_LDFLAGS_VAL+=" " # Add space separator if needed (e.g., after Linux Vulkan flags)
+_log "Checking for Vulkan support..."
+if command -v pkg-config &> /dev/null && pkg-config --exists vulkan; then
+    _log "System Vulkan SDK found via pkg-config. Enabling Vulkan support."
+    FFMPEG_EXTRA_FLAGS="--enable-vulkan"
+else
+    _log "Warning: System Vulkan SDK not found via pkg-config. Skipping --enable-vulkan."  
+    _log "         Ensure 'libvulkan-dev' (or equivalent) is installed via apt."
 fi
-EXTRA_LDFLAGS_VAL+="-Wl,-rpath,${INSTALL_PREFIX}/lib:${INSTALL_PREFIX}/lib/x86_64-linux-gnu"
+
+# Add rpath to LDFLAGS to find libs in INSTALL_PREFIX
+EXTRA_LDFLAGS_VAL="-Wl,-rpath,${INSTALL_PREFIX}/lib:${INSTALL_PREFIX}/lib/x86_64-linux-gnu"
 
 # --- Build configure arguments array ---
 CONFIGURE_ARGS=(
@@ -387,15 +363,8 @@ CONFIGURE_ARGS=(
     --enable-lcms2      # Dependency for libplacebo
 )
 
-# Add conditional flags to the array
-# Removed empty if block for EXTRA_CFLAGS_VAL
-if [[ -n "$EXTRA_LDFLAGS_VAL" ]]; then
-    # Use the EXTRA_LDFLAGS_VAL which includes the correct rpath
-    CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL")
-else
-    # This should not happen since we always set EXTRA_LDFLAGS_VAL above
-    CONFIGURE_ARGS+=(--extra-ldflags="-Wl,-rpath,${INSTALL_PREFIX}/lib:${INSTALL_PREFIX}/lib/x86_64-linux-gnu")
-fi
+# Add LDFLAGS to the array
+CONFIGURE_ARGS+=(--extra-ldflags="$EXTRA_LDFLAGS_VAL")
 if [[ -n "$FFMPEG_EXTRA_FLAGS" ]]; then
     # Split FFMPEG_EXTRA_FLAGS in case it contains multiple flags in the future
     read -ra flags <<< "$FFMPEG_EXTRA_FLAGS"
